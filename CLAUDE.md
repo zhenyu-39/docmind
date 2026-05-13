@@ -130,7 +130,7 @@ docmind/
 - [x] Phase 1 — SQLAlchemy 模型 + Alembic 迁移 + DB 连接 + FastAPI 入口 + 前端环境
 - [x] Phase 1 — ChromaDB 连接 & collection 创建
 - [x] Phase 1 — JWT 认证（注册/登录 + 中间件 + 异常类全覆盖）
-- [ ] Phase 1 剩余 — 前端登录页 + 路由
+- [x] Phase 1 剩余 — 前端登录页 + 路由
 - [ ] Phase 2 — 文档入库
 - [ ] Phase 3 — 核心问答
 - [ ] Phase 4 — 会话记忆
@@ -153,6 +153,12 @@ docmind/
 | `middleware/auth_middleware.py` | 纯 ASGI JWT 验证中间件，公开路由白名单 + OPTIONS 放行 |
 | `main.py` | FastAPI app + CORS + AuthMiddleware + auth_router + `/api/health` |
 | `frontend/` | Vite + Vue 3 环境搭好，`main.js` + `App.vue` 可运行，其余文件均为空占位 |
+| `styles/global.css` | 全局 CSS 变量（Design Token）+ 重置 + 滚动条 + 组件基础样式，对齐 UIDESIGN.md |
+| `views/LoginPage.vue` | 登录/注册页 — 渐变背景 + Logo + Tab 切换 + 图标输入框 + 前端校验 |
+| `router/index.js` | Vue Router + 三级路由守卫（公开/需登录/需管理员） |
+| `stores/auth.js` | Pinia 认证 store — login/register/logout + JWT 解析 + localStorage 持久化 |
+| `api/index.js` | Axios 实例 — 请求拦截器（Bearer Token）+ 401 响应拦截器 |
+| `api/auth.js` | 认证 API 封装（register/login） |
 
 ---
 
