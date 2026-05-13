@@ -74,6 +74,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
@@ -87,6 +88,8 @@ const errorMsg = ref('')
 
 function switchMode(m) {
   mode.value = m
+  username.value = ''
+  password.value = ''
   errorMsg.value = ''
 }
 
@@ -94,8 +97,13 @@ async function handleSubmit() {
   errorMsg.value = ''
 
   // 前端基础校验
-  if (!username.value.trim()) {
+  const name = username.value.trim()
+  if (!name) {
     errorMsg.value = '请输入用户名'
+    return
+  }
+  if (name.length < 2) {
+    errorMsg.value = '用户名至少 2 个字符'
     return
   }
   if (password.value.length < 6) {
@@ -114,7 +122,7 @@ async function handleSubmit() {
       mode.value = 'login'
       password.value = ''
       errorMsg.value = ''
-      // 使用 Element Plus 消息提示（如已引入）或静默切换
+      ElMessage.success('注册成功，请登录')
     }
   } catch (err) {
     const data = err.response?.data
