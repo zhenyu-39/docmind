@@ -169,3 +169,49 @@ git push -u origin main             # 推送至远程
 - 默认分支: `main`
 - 首次提交: `568de74` (仅 README.md)
 - 待提交: `.gitignore`, `DESIGN.md`, `CHANGE.md`, `backend/`, `frontend/`（脚手架文件）
+
+---
+
+## 2026-05-13 — Phase 1: 前端登录页 + 路由 + 全局样式
+
+### 新增
+
+| 文件 | 说明 |
+|:---|:---|
+| `frontend/src/styles/global.css` | 全局 CSS 变量（Design Token）+ 重置样式 + 组件基础样式，严格对齐 UIDESIGN.md §1-2 |
+| `frontend/src/views/LoginPage.vue` | 登录/注册页，含渐变背景、Logo、Tab 切换、表单验证、错误提示，样式对齐 UIDESIGN.md |
+| `frontend/src/router/index.js` | Vue Router 配置，含路由守卫（公开/认证/管理员三级权限），懒加载页面 |
+| `frontend/src/stores/auth.js` | Pinia 认证状态管理（login/register/logout），JWT 解析 + localStorage 持久化 |
+| `frontend/src/api/index.js` | Axios 实例 + 请求拦截器（Bearer Token）+ 响应拦截器（401 跳转登录页） |
+| `frontend/src/api/auth.js` | 认证 API 封装（register/login） |
+
+### 修改
+
+| 文件 | 说明 |
+|:---|:---|
+| `frontend/index.html` | 添加 Font Awesome 6.5.1 CDN 链接 |
+| `frontend/src/main.js` | 导入 `global.css` |
+| `frontend/vite.config.js` | 添加 `@` 路径别名（→ `./src`） |
+| `frontend/src/views/admin/*.vue` | 填充占位 `<template>`，修复空文件导致构建失败 |
+| `frontend/src/views/ChatPage.vue` | 同上，填充占位内容 |
+
+### 路由设计
+
+| 路径 | 页面 | 权限 |
+|:---|:---|:---|
+| `/login` | LoginPage | 公开（已登录自动跳转 `/chat`） |
+| `/chat` | ChatPage | 需登录 |
+| `/admin/documents` | DocumentList | 需管理员 |
+| `/admin/conversations` | ConversationList | 需管理员 |
+| `/admin/knowledge` | KnowledgeList | 需管理员 |
+| `/` | — | 重定向 `/chat` |
+
+### 数据流
+
+```
+LoginPage → authStore.login() → api/auth.js POST /api/auth/login
+           → 解析 JWT payload → localStorage 持久化 → router.push('/chat')
+
+LoginPage → authStore.register() → api/auth.js POST /api/auth/register
+           → 注册成功 → 切换至登录模式
+```
