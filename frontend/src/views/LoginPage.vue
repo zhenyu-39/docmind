@@ -115,6 +115,7 @@ async function handleSubmit() {
   try {
     if (mode.value === 'login') {
       await authStore.login(username.value.trim(), password.value)
+      ElMessage.success('登录成功')
       router.push('/chat')
     } else {
       await authStore.register(username.value.trim(), password.value)

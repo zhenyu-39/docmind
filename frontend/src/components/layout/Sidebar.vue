@@ -47,7 +47,7 @@
 
     <!-- 底部：用户信息 -->
     <div class="sidebar-bottom">
-      <div class="user-bar" @click="handleLogout">
+      <div class="user-bar">
         <div class="user-avatar">
           {{ authStore.user?.username?.charAt(0)?.toUpperCase() || 'U' }}
         </div>
@@ -55,7 +55,7 @@
           <div class="user-name">{{ authStore.user?.username || '用户' }}</div>
           <div class="user-role">{{ authStore.isAdmin ? '管理员' : '用户' }}</div>
         </div>
-        <button class="logout-btn" title="退出登录">
+        <button class="logout-btn" title="退出登录" @click.stop="handleLogout">
           <i class="fas fa-sign-out-alt"></i>
         </button>
       </div>
@@ -65,6 +65,7 @@
 
 <script setup>
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
@@ -76,6 +77,7 @@ function handleNewChat() {
 
 function handleLogout() {
   authStore.logout()
+  ElMessage.success('已退出登录')
   router.push('/login')
 }
 </script>
