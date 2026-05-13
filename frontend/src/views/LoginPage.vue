@@ -126,15 +126,7 @@ async function handleSubmit() {
     }
   } catch (err) {
     const data = err.response?.data
-    // 后端返回的统一错误格式：{ detail: { code, message, detail } }
-    // 又或者直接 { code, message, detail }
-    if (data?.detail?.message) {
-      errorMsg.value = data.detail.message
-    } else if (data?.message) {
-      errorMsg.value = data.message
-    } else {
-      errorMsg.value = '网络异常，请稍后重试'
-    }
+    errorMsg.value = data?.message || '网络异常，请稍后重试'
   } finally {
     loading.value = false
   }
