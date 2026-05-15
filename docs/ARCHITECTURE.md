@@ -1,0 +1,514 @@
+# ARCHITECTURE — 架构设计文档
+
+| 属性 | 值 |
+|:---|:---|
+| 文档版本 | v0.3 |
+| 最后更新 | 2026-05-14 |
+| 作者 | yuz |
+| 状态 | 草稿 |
+
+---
+
+## 1. 技术选型
+
+| 层面 | 技术 | 说明 |
+|:---|:---|:---|
+| 后端框架 | FastAPI | 异步 Python Web 框架，原生支持 SSE |
+| AI 编排 | LangChain | RAG 链路编排，但不依赖其高级封装 |
+| LLM | DeepSeek (OpenAI 兼容接口) | 支持 OpenAI / 通义千问 / DeepSeek 等互换 |
+| Embedding | DashScope text-embedding-v3 | 1024 维向量，中文优化 |
+| 向量数据库 | ChromaDB | 嵌入式运行，零配置，轻量级场景首选 |
+| 关系数据库 | MySQL + aiomysql | 业务数据持久化 |
+| 异步 ORM | SQLAlchemy 2.0 async | Mapped 类型注解 + async session |
+| 缓存 | Redis | 会话缓存 + Celery broker |
+| 异步入库 | Redis + Celery | 文档入库异步任务队列 |
+| 文档解析 | Unstructured + PyPDF2 + python-docx | 多格式文档统一提取纯文本 |
+| 关键词检索 | jieba 分词 + 自定义 BM25 | 替代 rank-bm25（见 §7.2） |
+| 文件存储 | 本地磁盘（可扩展至 OSS） | 抽象 StorageBackend 接口，当前本地实现 |
+| 流式输出 | SSE (Server-Sent Events) | 实时推送 LLM 生成内容 |
+| 前端框架 | Vue 3 + Vite | Composition API + SFC |
+| UI 组件库 | Element Plus | 企业级 Vue 3 组件库 |
+| 状态管理 | Pinia | Vue 3 官方推荐 |
+| 前端语言 | JavaScript | SFC + JS（非 TypeScript），见 §7.4 |
+| Markdown 渲染 | markdown-it | 问答内容渲染 |
+| HTTP 客户端 | Axios | 前端请求封装 |
+| 前端路由 | Vue Router | SPA 路由管理 |
+| 图标库 | Font Awesome 6 Free | UI 图标统一方案 |
+
+---
+
+## 2. 系统架构概览
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                        前端 (Vue 3)                           │
+│  ChatPage  │  LoginPage  │  admin/  │  Sidebar  │  SSE 解析  │
+└──────────────────────────┬───────────────────────────────────┘
+                           │ HTTP + SSE
+┌──────────────────────────▼───────────────────────────────────┐
+│                      FastAPI 后端                             │
+│                                                              │
+│  api/auth  api/kb  api/doc  api/chat  api/admin              │
+│     │         │       │        │         │                   │
+│  services/   services/  services/  services/  services/      │
+│     │              │         │        │                      │
+│  ┌──▼──────────────▼─────────▼────────▼──────────────────┐   │
+│  │                   RAG 核心                              │   │
+│  │  Intent → Rewrite → Retriever → RRF → Rerank → Prompt  │   │
+│  └────────────────────────┬───────────────────────────────┘   │
+│                           │                                   │
+│  ┌──────────┬─────────────┼──────────────┬────────────────┐  │
+│  │ ChromaDB │   MySQL     │    Redis     │  File Storage  │  │
+│  │ (向量)   │  (业务数据)  │  (缓存/队列) │  (文档文件)    │  │
+│  └──────────┴─────────────┴──────────────┴────────────────┘  │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │              Celery Worker（异步入库）                  │    │
+│  │  Parser → Chunker → Embedder → ChromaDB + MySQL       │    │
+│  └──────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3. 核心功能模块
+
+### 3.1 模块总览：业务痛点 → 技术方案
+
+| 业务痛点 | 对应模块 | 技术方案 | 效果 |
+|:---|:---|:---|:---|
+| 文档格式五花八门（PDF/Word/MD） | **文档解析** | Unstructured + PyPDF2 + python-docx | 统一提取纯文本 |
+| 完整文档太长，无法直接检索 | **智能分块** | 固定大小 + 结构感知分块，重叠窗口保留上下文 | 检索粒度精准，不丢上下文 |
+| 关键词搜索"墨盒怎么换"找不到"打印机耗材更换" | **多路检索** | 向量检索（语义）+ BM25（关键词）+ RRF 融合 | 召回率大幅提升 |
+| 搜出来的结果排序不准 | **Rerank 重排序** | DashScope Rerank 模型精排（Phase 3 接入） | 相关文档排在前面 |
+| 用户连续提问"怎么申请"，系统不知道在问什么 | **问题重写** | LLM 结合对话历史补全指代和上下文 | 多轮对话不丢失意图 |
+| 用户问"今天天气"走知识库检索是浪费 | **意图识别** | LLM 分类：知识查询 / 闲聊 | 路由到正确处理分支 |
+| 200 页制度文档的检索结果塞给 LLM，Token 爆炸 | **Rerank 截断** | 检索 top-10 → 融合 → Rerank 后取 top-3 | 精准上下文，控制 Token |
+| 长对话 30 轮后 Token 超限 | **会话记忆** | 滑动窗口 + 旧消息 LLM 摘要压缩 | 记忆不丢，Token 受控 |
+| 大文件（100页PDF）上传后同步处理，用户等很久 | **异步入库** | Redis + Celery 异步任务 | 上传即返回，后台处理 |
+
+### 3.2 模块树
+
+```
+DocMind
+├── 文档入库（Ingestion）
+│   ├── 文档上传 & 格式解析
+│   ├── 文本分块策略
+│   ├── Embedding 向量化
+│   └── 向量入库（ChromaDB）
+├── 智能问答（Chat）
+│   ├── 意图识别
+│   ├── 问题重写
+│   ├── 多路检索（向量 + BM25）
+│   ├── RRF 融合排序
+│   ├── Rerank 重排序
+│   ├── Prompt 组装 & LLM 调用
+│   └── SSE 流式输出
+├── 会话管理（Session）
+│   ├── 多轮对话上下文
+│   ├── 滑动窗口记忆
+│   └── 会话 CRUD
+├── 知识库管理（Knowledge Base）
+│   ├── 知识库 CRUD
+│   ├── 文档列表 & 状态
+│   └── 分块可视化
+└── 意图识别（Intent）
+    ├── 意图分类（知识查询 / 闲聊）
+    └── 问题重写（多轮上下文补全）
+```
+
+---
+
+## 4. 文档入库流程
+
+### 4.0 文档状态机
+
+使用 `DocumentStatus(str, Enum)` 统一管理状态，前后端共享枚举值（详见 DATABASE.md §2.3）。
+
+```
+uploaded → parsing → chunking → embedding → vector_storing → completed
+              ↓         ↓          ↓            ↓
+          ───────────→ failed ←───────────────
+              ↓         ↓          ↓            ↓
+          success_with_warnings / partial_failed
+```
+
+**非终态**（允许轮询/retry）：`uploaded` `parsing` `chunking` `embedding` `vector_storing`
+
+**终态**（`TERMINAL_STATUSES`）：`{completed, success_with_warnings, partial_failed, failed}`
+
+**reprocess 触发**：仅 `partial_failed` / `failed` 允许重新处理。
+
+---
+
+### 4.1 入库流程图
+
+```
+用户上传文档
+    ↓
+FastAPI 接收文件:
+  - 格式校验（pdf/docx/md/txt，拒绝 .doc）
+  - 大小校验（≤ 50MB）
+  - 幂等检查（Redis SET NX）
+  - 同名检查（kb_id + filename）
+  - 保存文件至 uploads/{kb_id}/{doc_id}/{uuid}_{sanitized_filename}
+  - 创建 document 记录(status=uploaded)
+    ↓
+dispatch Celery Task: ingest_document(doc_id)
+    ↓
+立即返回 {"doc_id": 123, "status": "uploaded"} 给前端
+    ↓
+Celery Worker 异步执行入库流水线:
+  Parser → Chunker → Embedder (batch + checkpoint) → Vector Store (batch)
+    ↓
+每阶段更新 current_stage + last_success_batch（断点恢复）
+    ↓
+终态判定:
+  - 全部成功 → completed
+  - 失败 < 20% → success_with_warnings
+  - 失败 20-50% → partial_failed
+  - 失败 > 50% → failed
+    ↓
+MySQL chunk_count 事务更新 + kb.chunk_count 同步更新
+```
+
+> **注意**：Celery Worker crash 后重启，可根据 `current_stage` 和 `last_success_batch` 从断点恢复，不重复处理已成功的步骤/批次。
+
+---
+
+### 4.2 分块策略
+
+- **算法**：`RecursiveCharacterTextSplitter`，优先级分隔符：
+  ```python
+  ["\n\n", "\n", "。！？", ".!?", " ", ""]
+  ```
+- **单位**：`max_chars = 800~1200`（字符估算，不用精确 token）
+- **重叠**：50 tokens ≈ 100~150 字符（按 1 token ≈ 1.5-2 中文字符）
+- **Token 估算**：Phase 2 使用字符数估算（不引入 tiktoken）；精确值回写：DashScope API 返回的 `usage.total_tokens` 写入 `chunk.token_count`
+
+---
+
+### 4.3 ChromaDB 批量写入
+
+- **批次大小**：配置化 `CHROMA_BATCH_SIZE=100`（100~500 chunks/batch）
+- **禁止单条循环**：避免高频小写入导致 IO 抖动
+- **代码模板**：
+  ```python
+  for batch in batches(chunks, settings.CHROMA_BATCH_SIZE):
+      collection.add(
+          documents=[c.content for c in batch],
+          embeddings=[c.embedding for c in batch],
+          metadatas=[c.metadata for c in batch],
+          ids=[c.chroma_id for c in batch]
+      )
+  ```
+
+### 4.4 Embedding 批量与重试
+
+- **批次大小**：`EMBED_BATCH_SIZE=20`（配置化）
+- **重试**：`max_retries=5`，指数退避（1s → 2s → 4s → 8s → 16s）
+- **批次级 checkpoint**：失败时从当前批次恢复，不重新处理已成功的批次
+- **失败清理**：ChromaDB `add()` 非原子操作，任一 batch 失败 → 清理所有 batch 数据 → 标记 FAILED，保证 MySQL 与 ChromaDB 一致
+
+### 4.5 Celery 幂等性
+
+- **幂等键格式**：`idempotency_key:{doc_id}:{task_type}`（如 `123:ingest`）
+- **实现**：Redis 分布式锁 `SET key "locked" EX 600 NX`
+- **锁过期时间**：600s（与 `soft_time_limit` 对齐）
+- **触发规则**：
+  | 场景 | 行为 |
+  |:---|:---|
+  | 无锁 | 正常创建任务 |
+  | 有锁 + 运行中 | 拒绝，返回 E2011「文档正在处理中」 |
+  | 有锁 + Worker crash | 等待锁过期后自动允许重新触发 |
+  | 终态 + 无锁 + reprocess | 允许重新触发（清理旧数据） |
+
+### 4.6 chunk_count 事务更新
+
+禁止每插入一个 chunk 更新一次 count。正确流程：
+
+```
+所有 batch 成功
+→ MySQL 事务:
+    UPDATE documents SET chunk_count=?, status='completed' WHERE id=?
+    UPDATE knowledge_bases SET chunk_count=chunk_count+? WHERE id=?
+→ commit
+```
+
+任一 batch 失败 → ChromaDB 向量全清 → 抛出异常 → MySQL 回滚。
+
+### 4.7 文档解析容错
+
+- **策略**：部分容错，单页失败跳过并记录 warning
+- **分级判定**：
+
+| 失败比例 | 结果状态 |
+|:---|:---|
+| < 20% | `success_with_warnings` |
+| 20%~50% | `partial_failed` |
+| > 50% | `failed` |
+
+### 4.8 Celery 配置要点
+
+```python
+# broker: Redis
+CELERY_BROKER_URL = "redis://localhost:6379/0"
+CELERY_RESULT_BACKEND = "redis://localhost:6379/1"
+
+# 入库任务（耗时较长，放宽超时）
+@app.task(bind=True, max_retries=3, soft_time_limit=600)
+def ingest_document(self, doc_id):
+    ...
+```
+
+---
+
+## 5. 问答流程
+
+```
+用户提问
+    ↓
+[Intent] 意图识别 → 判断类型（查知识库 / 闲聊）
+    ↓ （如果是查知识库）
+[Rewrite] 问题重写 → 结合对话历史补全上下文
+    ↓
+[Retrieval] 多路检索 → 向量检索 + BM25 关键词检索
+    ↓
+[Fusion] RRF 融合排序 → 合并两路结果
+    ↓
+[Rerank] 重排序 → 当前 NoopReranker 占位，Phase 3 接入 DashScope Rerank API
+    ↓
+[Prompt] 组装 Prompt → 拼接检索结果 + 对话历史 + 用户问题
+    ↓
+[LLM] 调用 LLM → SSE 流式返回答案
+```
+
+### 5.1 问答核心逻辑（伪代码）
+
+```python
+# chat_service.py 核心流程
+async def chat(question, conversation_id, kb_id, deep_thinking):
+    # 1. 意图识别
+    intent = await intent_classifier.classify(question)
+
+    # 2. 问题重写（多轮对话上下文补全）
+    if conversation_id:
+        history = await get_conversation_history(conversation_id)
+        question = await question_rewriter.rewrite(question, history)
+
+    # 3. 多路检索
+    vector_results = await vector_retriever.search(question, kb_id, top_k=10)
+    bm25_results = await bm25_retriever.search(question, kb_id, top_k=10)
+    merged = rrf_fusion(vector_results, bm25_results)
+
+    # 4. 重排序
+    reranked = await reranker.rerank(question, merged, top_k=5)
+
+    # 5. 拼 Prompt
+    prompt = prompt_builder.build(question, reranked, history)
+
+    # 6. 调用 LLM，SSE 流式输出
+    async for chunk in llm.stream(prompt):
+        yield sse_event("message", chunk)
+
+    yield sse_event("finish", {...})
+```
+
+---
+
+## 6. 多路检索设计
+
+| 通道 | 技术 | 优势 | 劣势 |
+|:---|:---|:---|:---|
+| 向量检索 | Embedding + ChromaDB | 语义理解强 | 精确匹配弱（如订单号） |
+| BM25 关键词 | jieba 分词 + 自定义 BM25 | 精确匹配强 | 不理解语义 |
+
+**融合策略：RRF (Reciprocal Rank Fusion)**
+
+```
+score(doc) = Σ 1 / (k + rank_i(doc))   # k=60
+```
+
+其中 `k=60` 是平滑常数，降低单一排序中的极端排名对最终结果的过度影响。
+
+---
+
+## 7. 关键设计决策
+
+### 7.1 ChromaDB Collection 策略
+
+| 阶段 | 方案 | 说明 |
+|:---|:---|:---|
+| 当前 | **共用 Collection + Metadata 隔离** | 所有知识库共用一个 `docmind` collection，通过 metadata 中的 `kb_id` 字段在查询时做 WHERE 过滤 |
+| 扩展条件 | 评估是否需要独立 Collection | 当知识库数量增多或业务隔离需求明显时考虑 |
+| 生产标准 | 3 个以上完全独立的业务线 → 独立 Collection；否则共用 | 独立 Collection 物理隔离、可单独配置索引参数；代价是内存占用增加 |
+
+**实现要点**：
+- ChromaDB 只有一个 collection：`docmind`
+- 每个 chunk 写入时带 metadata：`{"kb_id": 1, "doc_id": 5, "chunk_index": 3, "page": 2}`
+- 检索时加 where 条件过滤 kb_id：
+
+```python
+collection.query(
+    query_embeddings=[query_vector],
+    n_results=10,
+    where={"kb_id": kb_id}
+)
+```
+
+**KB 删除时的向量清理**（单 Collection 架构）：
+```python
+# 通过 metadata filter 批量删除，而非 drop collection
+collection.delete(where={"kb_id": kb_id})
+```
+- KB 删除流程：标记 `kb.status=deleting` → Celery Worker 执行 `collection.delete(where={"kb_id": x})` + 删除文件 → `DELETE FROM knowledge_bases WHERE id=?`（FK CASCADE 自动清理子记录）
+- 禁止使用 API 级联同步删除，避免大数据量场景接口超时
+
+**持久化与连接**：
+- ChromaDB 使用 `PersistentClient`，数据持久化到 `backend/chroma_data/chroma.sqlite3`
+- 持久化目录由 `.env` 中的 `CHROMA_PERSIST_DIR` 配置（默认 `./chroma_data`）
+- 应用启动时（`main.py` lifespan）自动初始化并获取/创建 collection
+- Collection 索引使用 `hnsw:space=cosine`（余弦相似度）
+
+### 7.2 BM25 实现方案
+
+**当前决策**：使用 **jieba 中文分词 + 自定义 BM25 实现**，弃用 `rank-bm25` 库。
+
+**原因**：
+- `rank-bm25` 库年久失修，最近一次更新已超过 2 年
+- 该库基于空格分词，对中文文本无分词能力，检索效果差
+- 自定义实现轻量且可控，核心公式简洁
+
+> **待办**：Phase 2 实现时从 `requirements.txt` 移除 `rank-bm25==0.2.*`（当前仍残留在依赖文件中，但不被代码引用）。
+
+**实现要点**：
+- 使用 jieba 对每篇文档分块做分词
+- 维护语料级别的 IDF 统计
+- BM25 标准公式：`score(D,Q) = Σ IDF(qi) * (f(qi,D) * (k1+1)) / (f(qi,D) + k1 * (1-b + b*|D|/avgdl))`
+
+### 7.3 Rerank 策略
+
+| 阶段 | 方案 | 说明 |
+|:---|:---|:---|
+| Phase 1-2 | **NoopReranker（跳过）** | 先跑通核心链路，仅用 RRF 融合排序 |
+| Phase 3 | **DashScope Rerank API** | 中文场景首选，阿里通义千问的 Rerank 模型对中文长文本效果好，有免费额度 |
+
+**接口设计**：
+
+```python
+# rag/reranker.py
+from abc import ABC, abstractmethod
+
+class BaseReranker(ABC):
+    @abstractmethod
+    async def rerank(self, query: str, documents: list, top_k: int) -> list:
+        ...
+
+class NoopReranker(BaseReranker):
+    """占位实现，直接截取 top_k"""
+    async def rerank(self, query, documents, top_k):
+        return documents[:top_k]
+
+class DashScopeReranker(BaseReranker):
+    """Phase 3 实现：调用 DashScope Rerank API"""
+    async def rerank(self, query, documents, top_k):
+        # TODO: Phase 3 实现
+        ...
+```
+
+### 7.4 前端语言选型
+
+**当前决策**：使用 **JavaScript（非 TypeScript）**。
+
+**原因**：
+- 项目为个人开发（校招简历项目），JS 开发效率更高，无需额外配置类型系统
+- 前端规模可控（~12 个组件、~3 个页面），类型检查收益有限
+- 如后续团队协作或规模增长，可渐进式迁移（Vue 3 支持 JS + TS 混用）
+
+### 7.5 文件存储策略
+
+| 阶段 | 方案 | 说明 |
+|:---|:---|:---|
+| 当前 | **本地磁盘存储** | 文件保存在 `backend/uploads/` 目录 |
+| 扩展 | **S3 兼容对象存储（OSS/MinIO）** | 抽象 `StorageBackend` 接口，本地实现和 OSS 实现可互换 |
+
+**文件目录结构**：
+```
+uploads/{kb_id}/{doc_id}/{uuid}_{sanitized_filename}
+```
+- 例：`uploads/1/5/a1b2c3d4_入职指南.pdf`
+- `sanitized_filename`：去除特殊字符后的安全文件名
+- `uuid`：防重名，同时保留原始文件名便于排查
+
+```python
+# 当前：本地存储
+UPLOAD_DIR = Path("uploads")
+file_path = UPLOAD_DIR / str(kb_id) / str(doc_id) / f"{uuid}_{sanitized_filename}"
+
+# 扩展接口
+class StorageBackend(ABC):
+    async def save(self, file, kb_id: int, doc_id: int, filename: str) -> str: ...
+    async def read(self, path: str) -> bytes: ...
+    async def delete(self, path: str) -> None: ...
+
+class LocalStorage(StorageBackend): ...    # 当前使用
+class OSSStorage(StorageBackend): ...      # 后续扩展
+```
+
+---
+
+## 8. 会话记忆策略
+
+- **滑动窗口**：保留最近 N 轮对话（默认 10 轮）
+- **摘要压缩**：超过窗口的旧消息用 LLM 生成摘要
+- **Token 控制**：总上下文 Token 数不超过模型上限的 80%
+
+---
+
+## 9. 当前决策与已知局限
+
+### 9.1 ChromaDB 规模上限
+
+- **当前方案**：共用 Collection + Metadata 隔离，适用于 **< 5 万 chunk** 总量
+- **风险**：共享 Collection 下，`WHERE` 过滤发生在查询阶段而非索引阶段，chunk 数量增大后检索延迟线性增长
+- **缓解**：当 total_chunks > 5 万或 P95 检索延迟 > 500ms 时，评估迁移至独立 Collection 方案
+- **长期方向**：如业务需要支持 100 万+ chunk 规模，考虑迁移至 Milvus 或 Qdrant
+
+### 9.2 Celery 任务超时
+
+- 单文档入库 soft_time_limit 设为 600s（10 分钟）
+- **风险**：超大 PDF（200+ 页）可能在 10 分钟内无法完成 Embedding API 调用
+- **缓解**：超大文档在上传前建议拆分为子文档；后续可考虑分页并行 Embedding
+
+### 9.3 BM25 实现
+
+- 使用 jieba 分词 + 自定义 BM25，弃用 rank-bm25
+- **风险**：自定义 BM25 初期可能存在 IDF 计算偏差
+- **缓解**：在回归测试集上对比向量检索单路 vs BM25 单路 vs RRF 双路融合的 Recall@5，确保 BM25 贡献正向
+
+### 9.4 LLM 幻觉与溯源准确性
+
+- **风险**：LLM 可能引用不存在的文档内容（幻觉），或错误归因来源
+- **缓解**：Prompt 中强调「仅基于提供的文档内容回答，无法回答时明确说明」；来源引用以 chunk_id 为准在 MySQL 中回溯文档名和页码
+
+### 9.5 前端 JS/TS
+
+- 当前使用 JavaScript，不引入 TypeScript
+- **风险**：随着组件增多，props/events 类型缺少编译期检查
+- **缓解**：保持组件数量可控（< 20 个）；如后续扩展团队，可渐进式迁移
+
+> TODO: [待补充] 部署架构图 — 生产环境的 Nginx 反向代理、SSL 终结、静态资源托管策略。
+> TODO: [待补充] Refresh Token 设计 — 当前为纯无状态 JWT，access_token 签发后无法主动吊销（如改密/踢下线），token 过期后需重新登录。后续引入 refresh_token（长有效期，哈希存 MySQL/Redis），搭配 access_token（短有效期），支持无感续期和主动吊销。
+> TODO: [待补充] 监控与告警方案 — 应用级指标（请求延迟、错误率）+ LLM 调用监控（Token 消耗、API 失败重试）。
+
+---
+
+## 10. 相关文档
+
+- [产品需求文档](PRD.md)
+- [数据库设计文档](../backend/docs/DATABASE.md)
+- [接口文档](../backend/docs/API.md)
+- [开发指南](DEVELOPMENT.md)
+- [开发排期](ROADMAP.md)
+- [测试策略](TESTING.md)
+- [UI 设计规范](../frontend/docs/UIDESIGN.md)

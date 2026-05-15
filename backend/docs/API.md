@@ -1,0 +1,990 @@
+# API — 接口文档
+
+| 属性 | 值 |
+|:---|:---|
+| 文档版本 | v0.3 |
+| 最后更新 | 2026-05-14 |
+| 作者 | yuz |
+| 状态 | 草稿 |
+
+---
+
+## 1. 通用约定
+
+### 1.1 基础信息
+
+| 项目 | 值 |
+|:---|:---|
+| Base URL | `http://localhost:8000/api` |
+| 认证方式 | Bearer Token（JWT），登录后携带 `Authorization: Bearer <token>` |
+| Content-Type | `application/json`（除文件上传使用 `multipart/form-data`） |
+| 字符编码 | UTF-8 |
+
+### 1.2 通用响应格式
+
+**成功响应**：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": { ... }
+}
+```
+
+> **注意**：所有成功响应必须包含 `code`、`message`、`data` 三个字段。当前部分接口仅返回 `{code, data}`，Phase 2 起统一补齐 `message` 字段。
+
+**错误响应**：
+
+```json
+{
+  "code": "E1001",
+  "message": "知识库不存在",
+  "detail": "kb_id=999 不存在或已被删除"
+}
+```
+
+### 1.3 统一错误码
+
+#### 知识库错误（E1xxx）
+
+| 错误码 | HTTP 状态码 | 说明 |
+|:---|:---|:---|
+| E1001 | 404 | 知识库不存在 |
+| E1002 | 409 | 知识库名称已存在 |
+#### 文档错误（E2xxx）
+
+| 错误码 | HTTP 状态码 | 说明 |
+|:---|:---|:---|
+| E2001 | 404 | 文档不存在 |
+| E2002 | 415 | 文件格式不支持（仅支持 pdf/docx/md/txt） |
+| E2003 | 400 | 文件大小超限（上限 50MB） |
+| E2004 | 500 | 文档解析失败 |
+| E2005 | 500 | 文档入库失败（Embedding/ChromaDB 写入异常） |
+| E2006 | 500 | 存储错误（磁盘满 / IO 异常） |
+| E2007 | 500 | 向量存储错误（ChromaDB 写入失败） |
+| E2008 | 502 | Embedding 超时 / 限流（DashScope API 异常） |
+| E2009 | 400 | 解析器错误（文档格式损坏或无法解析） |
+| E2010 | 400 | 重新处理失败（非 FAILED/PARTIAL_FAILED 状态不允许 reprocess） |
+| E2011 | 409 | 文档正在处理中（幂等锁冲突，重复触发被拒绝） |
+| E2012 | 409 | force=true 但旧文档仍在处理中，无法覆盖 |
+| E2013 | 409 | 文档名称已存在（kb_id + filename 冲突，需使用 force=true 覆盖） |
+
+#### 会话错误（E3xxx）
+
+| 错误码 | HTTP 状态码 | 说明 |
+|:---|:---|:---|
+| E3001 | 404 | 会话不存在 |
+| E3002 | 403 | 无权访问此会话（不属于当前用户） |
+
+#### 问答错误（E4xxx）
+
+| 错误码 | HTTP 状态码 | 说明 |
+|:---|:---|:---|
+| E4001 | 400 | 知识库无可用文档（需先上传文档） |
+| E4002 | 502 | LLM 调用失败 |
+| E4003 | 500 | 检索服务异常 |
+| E4004 | 429 | LLM 调用频率超限 |
+| E4005 | 400 | 问题内容为空 |
+
+#### 认证错误（E5xxx）
+
+| 错误码 | HTTP 状态码 | 说明 |
+|:---|:---|:---|
+| E5001 | 409 | 用户名已存在 |
+| E5002 | 401 | 用户名或密码错误 |
+| E5003 | 401 | Token 已过期 |
+| E5004 | 401 | Token 无效或格式错误 |
+| E5005 | 403 | 无权限执行此操作 |
+
+#### 系统错误（E9xxx）
+
+| 错误码 | HTTP 状态码 | 说明 |
+|:---|:---|:---|
+| E9001 | 500 | 服务器内部错误 |
+| E9002 | 503 | 服务暂不可用 |
+| E9003 | 422 | 请求参数校验失败 |
+| E9004 | 429 | 请求频率超限 |
+
+---
+
+## 2. 认证接口
+
+### POST `/api/auth/register`
+
+**权限**：公开
+
+**请求**：
+
+```json
+{
+  "username": "zhangsan",
+  "password": "mypassword123"
+}
+```
+
+**响应** (201)：
+
+```json
+{
+  "code": 0,
+  "message": "注册成功",
+  "data": {
+    "id": 1,
+    "username": "zhangsan",
+    "role": "user",
+    "created_at": "2026-05-11T10:00:00"
+  }
+}
+```
+
+### POST `/api/auth/login`
+
+**权限**：公开
+
+**请求**：
+
+```json
+{
+  "username": "zhangsan",
+  "password": "mypassword123"
+}
+```
+
+**响应** (200)：
+
+```json
+{
+  "code": 0,
+  "message": "登录成功",
+  "data": {
+    "access_token": "eyJhbGciOiJIUzI1NiIs...",
+    "token_type": "bearer",
+    "expires_in": 86400
+  }
+}
+```
+
+> TODO [Phase 5]: `POST /api/auth/refresh` — Refresh Token 换发接口。
+> - access_token：15-30min 短有效期
+> - refresh_token：7 天持久化存储（MySQL/Redis），支持无感续期
+> - Rotation 机制：刷新后旧 token 立即失效
+> - 主动吊销：改密 / 强制下线场景支持批量失效
+> - 排期理由：Phase 1-4 核心问答链路优先，当前 24h access_token 开发阶段够用，企业级安全在 Phase 5 打磨阶段完成
+
+---
+
+## 3. 知识库接口
+
+### POST `/api/knowledge-bases`
+
+**权限**：user（需登录）
+
+创建知识库。
+
+**请求**：
+
+```json
+{
+  "name": "公司内部知识库",
+  "description": "包含 HR、IT、行政、业务等部门的制度文档"
+}
+```
+
+**响应** (201)：
+
+```json
+{
+  "code": 0,
+  "message": "知识库创建成功",
+  "data": {
+    "id": 1,
+    "name": "公司内部知识库",
+    "description": "包含 HR、IT、行政、业务等部门的制度文档",
+    "user_id": 1,
+    "doc_count": 0,
+    "chunk_count": 0,
+    "created_at": "2026-05-11T10:30:00"
+  }
+}
+```
+
+### GET `/api/knowledge-bases`
+
+**权限**：user（需登录）
+
+获取当前用户的知识库列表。
+
+**响应** (200)：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": [
+    {
+      "id": 1,
+      "name": "公司内部知识库",
+      "description": "...",
+      "doc_count": 5,
+      "chunk_count": 128,
+      "created_at": "2026-05-11T10:30:00",
+      "updated_at": "2026-05-11T14:00:00"
+    }
+  ]
+}
+```
+
+### GET `/api/knowledge-bases/{id}`
+
+**权限**：user（需登录）
+
+获取知识库详情。
+
+**响应** (200)：同创建响应结构
+
+### PUT `/api/knowledge-bases/{id}`
+
+**权限**：user（需登录，仅创建者或 admin 可修改）
+
+更新知识库名称或描述。
+
+**请求**：
+
+```json
+{
+  "name": "公司内部知识库（更新版）",
+  "description": "更新后的描述"
+}
+```
+
+### DELETE `/api/knowledge-bases/{id}`
+
+**权限**：user（需登录，仅创建者或 admin 可删除）
+
+删除知识库及其下所有文档和向量数据（异步批量清理）。
+
+**响应** (202)：
+
+```json
+{
+  "code": 0,
+  "message": "知识库删除任务已提交",
+  "data": { "kb_id": 1, "status": "deleting" }
+}
+```
+
+**异步清理流程**：
+
+```
+DELETE /api/knowledge-bases/{id}
+↓
+kb.status = deleting（拒绝新的上传/检索/reprocess）
+↓ 返回 202 Accepted
+↓
+Celery Worker（异步）:
+  1. collection.delete(where={"kb_id": kb_id})  — 清理 ChromaDB 向量
+  2. 批量删除磁盘文件（uploads/{kb_id}/ 目录）
+  3. DELETE FROM knowledge_bases WHERE id=?  — 物理删除 KB 记录
+     └─ FK ON DELETE CASCADE 自动级联删除 documents → chunks
+↓
+完成（KB 记录已物理删除，FK CASCADE 保证子记录同步清理）
+```
+
+**失败恢复**：Worker crash 后若 `status=deleting`，ChromaDB delete 幂等可重试。MySQL 物理 DELETE 前 crash 则重试清理；DELETE 后 crash 无需恢复（记录已清理）。
+
+> **约束**：知识库删除采用 KB 级异步批量清理。即使在单 Collection 架构下，KB 删除也**禁止**使用 API 级联同步删除，必须走 Celery 异步任务以保证大数据量场景下接口不超时。
+
+---
+
+## 4. 文档接口
+
+### 4.0 文档状态枚举
+
+所有接口统一使用 `DocumentStatus`（`str, Enum`），前后端共享：
+
+| 枚举值 | 数据库值 | 说明 | 终态？ |
+|:---|:---|:---|:---|
+| `UPLOADED` | `uploaded` | 文件已接收，等待入库 | ❌ |
+| `PARSING` | `parsing` | 文档解析中 | ❌ |
+| `CHUNKING` | `chunking` | 智能分块中 | ❌ |
+| `EMBEDDING` | `embedding` | 向量化中 | ❌ |
+| `VECTOR_STORING` | `vector_storing` | ChromaDB 写入中 | ❌ |
+| `COMPLETED` | `completed` | 全部成功 | ✅ |
+| `SUCCESS_WITH_WARNINGS` | `success_with_warnings` | 部分页警告但可接受（失败 < 20%） | ✅ |
+| `PARTIAL_FAILED` | `partial_failed` | 部分失败需人工确认（失败 20%-50%） | ✅ |
+| `FAILED` | `failed` | 完全失败（失败 > 50%） | ✅ |
+| `DELETING` | `deleting` | 异步清理进行中（随后物理删除行） | ❌ |
+
+**终态集合**（`TERMINAL_STATUSES`）：`{completed, success_with_warnings, partial_failed, failed}`
+
+**关键函数**：
+```python
+def is_terminal(status: str) -> bool:
+    return status in TERMINAL_STATUSES
+```
+
+- **前端轮询终点**：`is_terminal(status) → True` 停止轮询
+- **Celery 幂等**：终态任务拒绝重复入队（需显式 `force=true` 或 `reprocess`）
+- **reprocess 接口**：仅 `partial_failed` / `failed` 允许触发
+
+---
+
+### POST `/api/knowledge-bases/{kb_id}/documents`
+
+**权限**：user（需登录）
+
+上传文档（`multipart/form-data`），支持 `.pdf` `.docx` `.md` `.txt`。不支持 `.doc`（请先转换为 `.docx`）。
+
+**请求**：multipart/form-data
+
+| 字段 | 类型 | 必填 | 说明 |
+|:---|:---|:---|:---|
+| file | file | 是 | 文档文件（≤ 50MB） |
+| force | bool | 否 | 同名文档存在时是否覆盖（默认 false） |
+
+**上传行为规则**：
+
+| 场景 | 默认行为 | `force=true` |
+|:---|:---|:---|
+| 同名文档不存在 | 正常创建 | 同左 |
+| 同名文档存在且终态 | 拒绝，返回 E2013「文档名称已存在」 | 异步删除旧文档 → 创建新文档 |
+| 同名文档存在且处理中 | 拒绝，返回 E2011「文档正在处理中」 | 拒绝，返回 E2012「旧文档处理中无法覆盖」 |
+
+**`force=true` 覆盖流程**：
+```
+检查旧文档状态 → 处理中则拒绝(E2012)
+              → 终态则继续
+异步删除旧文档（status=deleting + Celery 清理向量/文件）
+创建新 document 记录（新 doc_id）
+触发新入库任务
+```
+
+**幂等性**：基于 Redis 分布式锁 `idempotency_key:{doc_id}:ingest`（TTL=600s）。处理中文档重复提交 → 返回 E2011。
+
+**响应** (201)：
+
+```json
+{
+  "code": 0,
+  "message": "文档上传成功，已加入处理队列",
+  "data": {
+    "id": 5,
+    "kb_id": 1,
+    "filename": "入职指南.pdf",
+    "file_type": "pdf",
+    "file_size": 204800,
+    "status": "uploaded"
+  }
+}
+```
+
+---
+
+### POST `/api/knowledge-bases/{kb_id}/documents/batch-upload`
+
+**权限**：user（需登录）
+
+批量上传文档（`multipart/form-data`，多文件）。适合企业初始化知识库场景。
+
+**请求**：multipart/form-data
+
+| 字段 | 类型 | 必填 | 说明 |
+|:---|:---|:---|:---|
+| files | file[] | 是 | 多文件（每个 ≤ 50MB） |
+
+**响应** (200) — 部分成功，非事务性：
+
+```json
+{
+  "code": 0,
+  "message": "批量上传完成",
+  "data": {
+    "success": [
+      { "id": 5, "filename": "入职指南.pdf", "status": "uploaded" },
+      { "id": 6, "filename": "报销制度.md", "status": "uploaded" }
+    ],
+    "failed": [
+      { "filename": "旧文档.doc", "reason": "E2002: 不支持 .doc 格式，请先转换为 .docx" },
+      { "filename": "入职指南.pdf", "reason": "E2013: 文档名称已存在" }
+    ]
+  }
+}
+```
+
+---
+
+### POST `/api/knowledge-bases/{kb_id}/documents/{id}/reprocess`
+
+**权限**：user（仅知识库 owner/admin）
+
+重新处理失败或部分失败的文档。
+
+**限制**：仅 `partial_failed` / `failed` 终态允许 reprocess。其他状态返回 E2010。
+
+**请求**：
+
+```json
+{}
+
+```
+
+**响应** (200)：
+
+```json
+{
+  "code": 0,
+  "message": "重新处理任务已提交",
+  "data": { "doc_id": 5, "status": "parsing" }
+}
+```
+
+**处理流程**：清理旧 chunk 记录 + 旧 ChromaDB 向量 → 重置 status → 重新进入 Celery 入库队列。
+
+---
+
+### GET `/api/knowledge-bases/{kb_id}/documents`
+
+**权限**：user（需登录）
+
+获取知识库下的文档列表（支持筛选和排序）。
+
+**查询参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|:---|:---|:---|:---|
+| status | string | 否 | 按状态过滤（如 `completed`, `failed`） |
+| filename | string | 否 | 按文件名模糊搜索（LIKE %xxx%） |
+| sort_by | string | 否 | 排序字段，默认 `created_at` |
+| order | string | 否 | `asc` / `desc`，默认 `desc` |
+
+**响应** (200)：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": [
+    {
+      "id": 5,
+      "filename": "入职指南.pdf",
+      "file_type": "pdf",
+      "file_size": 204800,
+      "status": "completed",
+      "chunk_count": 24,
+      "created_at": "2026-05-11T10:35:00"
+    }
+  ]
+}
+```
+
+---
+
+### GET `/api/knowledge-bases/{kb_id}/documents/{id}`
+
+**权限**：user（需登录）
+
+获取单个文档详情（含入库状态）。
+
+**响应** (200)：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": 5,
+    "kb_id": 1,
+    "filename": "入职指南.pdf",
+    "file_type": "pdf",
+    "file_size": 204800,
+    "status": "completed",
+    "chunk_count": 24,
+    "error_msg": null,
+    "created_at": "2026-05-11T10:35:00",
+    "updated_at": "2026-05-11T10:37:00"
+  }
+}
+```
+
+---
+
+### GET `/api/knowledge-bases/{kb_id}/documents/{id}/chunks`
+
+**权限**：仅知识库 owner / admin 可访问
+
+查看文档的分块列表（支持分页）。
+
+**查询参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|:---|:---|:---|:---|
+| page | int | 否 | 页码，默认 1 |
+| page_size | int | 否 | 每页条数，默认 20，最大 100 |
+
+**生产环境安全**：默认 chunk content 截断至 200 字符（`preview` 字段），`DEBUG_CHUNK_FULL=true` 时返回完整 `content`。
+
+**响应** (200)：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 150,
+    "page": 1,
+    "page_size": 20,
+    "items": [
+      {
+        "id": 1,
+        "chunk_index": 0,
+        "preview": "入职指南\n欢迎加入公司！...",
+        "token_count": 480,
+        "metadata": { "page": 1 }
+      }
+    ]
+  }
+}
+```
+
+---
+
+### DELETE `/api/knowledge-bases/{kb_id}/documents/{id}`
+
+**权限**：user（需登录）
+
+删除文档及其分块数据（异步清理 MySQL + ChromaDB + 磁盘文件）。
+
+**响应** (202)：
+
+```json
+{
+  "code": 0,
+  "message": "文档删除任务已提交",
+  "data": { "doc_id": 5, "status": "deleting" }
+}
+```
+
+**异步清理流程**：
+```
+status = deleting
+↓ 返回 202 Accepted
+↓
+Celery Worker（异步）:
+  1. collection.delete(where={"doc_id": doc_id})  — 清理 ChromaDB 向量
+  2. 删除磁盘文件（uploads/{kb_id}/{doc_id}/ 目录）
+  3. DELETE FROM documents WHERE id=?  — 物理删除文档记录
+     └─ FK ON DELETE CASCADE 自动级联删除 chunks
+↓
+完成（文档记录已物理删除，FK CASCADE 保证 chunks 同步清理）
+```
+
+> **禁止**接口同步删除磁盘文件/向量，避免大文档场景接口超时。
+
+---
+
+## 5. 会话接口
+
+### POST `/api/conversations`
+
+**权限**：user（需登录）
+
+创建新会话。
+
+**请求**：
+
+```json
+{
+  "kb_id": 1,
+  "title": "关于报销流程"
+}
+```
+
+**响应** (201)：
+
+```json
+{
+  "code": 0,
+  "message": "会话创建成功",
+  "data": {
+    "id": 1,
+    "user_id": 1,
+    "kb_id": 1,
+    "title": "关于报销流程",
+    "message_count": 0,
+    "created_at": "2026-05-11T11:00:00"
+  }
+}
+```
+
+### GET `/api/conversations`
+
+**权限**：user（需登录）
+
+获取当前用户的会话列表，按更新时间倒序。
+
+### GET `/api/conversations/{id}`
+
+**权限**：user（需登录，仅所有者可查看）
+
+获取会话详情（含消息历史）。
+
+**响应** (200)：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "id": 1,
+    "title": "关于报销流程",
+    "kb_id": 1,
+    "messages": [
+      {
+        "id": 1,
+        "role": "user",
+        "content": "报销差旅费需要哪些材料？",
+        "created_at": "2026-05-11T11:00:00"
+      },
+      {
+        "id": 2,
+        "role": "assistant",
+        "content": "根据公司报销制度，差旅费报销需要...",
+        "thinking_content": "用户询问差旅报销材料...",
+        "created_at": "2026-05-11T11:00:05"
+      }
+    ]
+  }
+}
+```
+
+### PUT `/api/conversations/{id}`
+
+**权限**：user（需登录，仅所有者）
+
+重命名会话。
+
+**请求**：
+
+```json
+{
+  "title": "差旅报销相关问答"
+}
+```
+
+### DELETE `/api/conversations/{id}`
+
+**权限**：user（需登录，仅所有者）
+
+删除会话及其全部消息。
+
+---
+
+## 6. 问答接口（核心）
+
+### POST `/api/chat`
+
+**权限**：user（需登录）
+
+发送问题，SSE 流式返回答案。这是系统的核心接口。
+
+**请求**：
+
+```json
+{
+  "conversation_id": null,
+  "kb_id": 1,
+  "question": "报销流程是怎样的？",
+  "deep_thinking": false
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|:---|:---|:---|:---|
+| conversation_id | int / null | 否 | 会话 ID，新对话传 null |
+| kb_id | int | 是 | 目标知识库 ID |
+| question | string | 是 | 用户问题（≤ 2000 字符） |
+| deep_thinking | bool | 否 | 是否启用深度思考模式（DeepSeek 特性），默认 false |
+
+**响应**：`text/event-stream` (SSE)
+
+### 6.1 SSE 事件完整格式
+
+#### `event: meta` — 元信息
+
+服务端处理开始，返回会话和任务标识。
+
+```
+event: meta
+data: {"conversation_id": 1, "task_id": "550e8400-e29b-41d4-a716-446655440000"}
+```
+
+| 字段 | 类型 | 说明 |
+|:---|:---|:---|
+| conversation_id | int | 会话 ID（新对话自动创建） |
+| task_id | string (UUID) | 本次问答的任务 ID |
+
+#### `event: thinking` — 思考过程（可选）
+
+仅当 `deep_thinking: true` 时输出。包含 LLM 的深度思考链路。
+
+```
+event: thinking
+data: {"delta": "用户询问报销流程，我需要从知识库中找到报销相关的文档..."}
+```
+
+| 字段 | 类型 | 说明 |
+|:---|:---|:---|
+| delta | string | 思考内容增量片段 |
+
+#### `event: message` — 答案内容
+
+LLM 生成的答案，逐 token 流式输出。
+
+```
+event: message
+data: {"delta": "根据公司报销制度，差旅报销需要提交以下材料：\n\n1. **差旅申请单**（需提前审批）\n2. **交通票据**（机票行程单/火车票）..."}
+```
+
+| 字段 | 类型 | 说明 |
+|:---|:---|:---|
+| delta | string | 答案内容增量片段（Markdown 格式） |
+
+#### `event: sources` — 引用来源
+
+检索到的文档分块，用于溯源。在所有 message 事件之后发送。
+
+```
+event: sources
+data: {"chunks": [{"doc_id": 5, "doc_name": "报销制度.md", "content": "差旅报销需提交：1. 差旅申请单...", "score": 0.92, "page": 3}, {"doc_id": 8, "doc_name": "财务审批流程.md", "content": "报销金额超过5000元需部门总监审批...", "score": 0.87, "page": 1}]}
+```
+
+| 字段 | 类型 | 说明 |
+|:---|:---|:---|
+| chunks | array | 引用来源数组 |
+| chunks[].doc_id | int | 文档 ID |
+| chunks[].doc_name | string | 文档名称 |
+| chunks[].content | string | 分块文本（摘要，截断至 200 字符） |
+| chunks[].score | float | RRF/Rerank 得分 |
+| chunks[].page | int | 页码（如有） |
+
+#### `event: finish` — 完成
+
+全部内容输出完毕。
+
+```
+event: finish
+data: {"message_id": 2, "title": "关于报销流程", "token_usage": {"prompt": 1500, "completion": 350, "total": 1850}}
+```
+
+| 字段 | 类型 | 说明 |
+|:---|:---|:---|
+| message_id | int | 保存的回答消息 ID |
+| title | string | 自动生成的对话标题（首轮时返回） |
+| token_usage | object | Token 消耗统计 |
+
+#### `event: error` — 错误
+
+检索或 LLM 调用失败时发送。
+
+```
+event: error
+data: {"code": "E4002", "message": "LLM 调用失败", "detail": "DeepSeek API 返回状态码 500，已重试 3 次"}
+```
+
+| 字段 | 类型 | 说明 |
+|:---|:---|:---|
+| code | string | 错误码（见 §1.3） |
+| message | string | 用户可读的错误描述 |
+| detail | string | 技术细节（可选，仅开发环境返回） |
+
+---
+
+## 7. 管理后台接口
+
+### GET `/api/admin/stats`
+
+**权限**：admin
+
+获取系统概览统计。
+
+**响应** (200)：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "user_count": 12,
+    "kb_count": 5,
+    "doc_count": 45,
+    "total_chunks": 2340,
+    "total_questions": 890
+  }
+}
+```
+
+### GET `/api/admin/documents`
+
+**权限**：admin
+
+获取全部文档列表（跨知识库）。
+
+**查询参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|:---|:---|:---|:---|
+| page | int | 否 | 页码，默认 1 |
+| page_size | int | 否 | 每页条数，默认 20 |
+| status | string | 否 | 按状态过滤 |
+
+---
+
+## 8. 完整请求/响应示例
+
+### 8.1 正常问答流程
+
+**Step 1 — 发起提问**：
+
+```
+POST /api/chat
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+Content-Type: application/json
+
+{
+  "conversation_id": null,
+  "kb_id": 1,
+  "question": "入职需要开通哪些账号？",
+  "deep_thinking": false
+}
+```
+
+**Step 2 — 服务端 SSE 流式返回**：
+
+```
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+
+event: meta
+data: {"conversation_id": 3, "task_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"}
+
+event: message
+data: {"delta": "根据《入职指南》，新员工入职需要开通以下账号：\n\n"}
+
+event: message
+data: {"delta": "1. **企业邮箱**（入职当天由 IT 自动开通）\n"}
+
+event: message
+data: {"delta": "2. **企业微信/钉钉**（HR 提前发送邀请链接）\n"}
+
+event: message
+data: {"delta": "3. **VPN 账号**（参考《VPN配置指南》自助开通）\n"}
+
+event: message
+data: {"delta": "4. **内部系统账号**（OA、报销系统等，由直属领导提交权限申请）"}
+
+event: sources
+data: {"chunks": [{"doc_id": 1, "doc_name": "入职指南.md", "content": "新员工入职当天需开通以下账号：...", "score": 0.95, "page": 2}, {"doc_id": 11, "doc_name": "VPN配置指南.md", "content": "VPN账号申请步骤：1. 访问...", "score": 0.78, "page": 1}]}
+
+event: finish
+data: {"message_id": 10, "title": "入职账号开通", "token_usage": {"prompt": 1200, "completion": 180, "total": 1380}}
+```
+
+### 8.2 错误流程：知识库无文档
+
+```
+POST /api/chat
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+Content-Type: application/json
+
+{
+  "conversation_id": null,
+  "kb_id": 999,
+  "question": "入职需要开通哪些账号？",
+  "deep_thinking": false
+}
+```
+
+**响应**（非流式，直接返回 JSON）：
+
+```json
+HTTP/1.1 404 Not Found
+Content-Type: application/json
+
+{
+  "code": 0,
+  "error": {
+    "code": "E1001",
+    "message": "知识库不存在",
+    "detail": "kb_id=999 不存在或已被删除"
+  }
+}
+```
+
+### 8.3 错误流程：LLM 调用异常
+
+```
+POST /api/chat
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+Content-Type: application/json
+
+{
+  "conversation_id": 3,
+  "kb_id": 1,
+  "question": "入职需要开通哪些账号？",
+  "deep_thinking": true
+}
+```
+
+**SSE 返回**（检索成功但 LLM 调用失败）：
+
+```
+event: meta
+data: {"conversation_id": 3, "task_id": "b2c3d4e5-f6a7-8901-bcde-f12345678901"}
+
+event: error
+data: {"code": "E4002", "message": "LLM 调用失败", "detail": "DeepSeek API 返回 503 Service Unavailable，已重试 3 次"}
+```
+
+---
+
+## 9. 接口权限速查表
+
+| 方法 | 路径 | 权限 | 说明 |
+|:---|:---|:---|:---|
+| POST | `/api/auth/register` | 公开 | 注册 |
+| POST | `/api/auth/login` | 公开 | 登录 |
+| POST | `/api/knowledge-bases` | user | 创建知识库 |
+| GET | `/api/knowledge-bases` | user | 知识库列表 |
+| GET | `/api/knowledge-bases/{id}` | user | 知识库详情 |
+| PUT | `/api/knowledge-bases/{id}` | user（所有者/admin） | 更新知识库 |
+| DELETE | `/api/knowledge-bases/{id}` | user（所有者/admin） | 删除知识库（异步） |
+| POST | `/api/knowledge-bases/{kb_id}/documents` | user | 上传文档（支持 force 覆盖） |
+| POST | `/api/knowledge-bases/{kb_id}/documents/batch-upload` | user | 批量上传文档 |
+| POST | `/api/knowledge-bases/{kb_id}/documents/{id}/reprocess` | user（所有者/admin） | 重新处理失败文档 |
+| GET | `/api/knowledge-bases/{kb_id}/documents` | user | 文档列表（支持筛选/排序） |
+| GET | `/api/knowledge-bases/{kb_id}/documents/{id}` | user | 文档详情 |
+| GET | `/api/knowledge-bases/{kb_id}/documents/{id}/chunks` | user（所有者/admin） | 查看分块（分页，生产截断） |
+| DELETE | `/api/knowledge-bases/{kb_id}/documents/{id}` | user | 删除文档（异步） |
+| POST | `/api/conversations` | user | 创建会话 |
+| GET | `/api/conversations` | user | 会话列表 |
+| GET | `/api/conversations/{id}` | user（所有者） | 会话详情 |
+| PUT | `/api/conversations/{id}` | user（所有者） | 重命名会话 |
+| DELETE | `/api/conversations/{id}` | user（所有者） | 删除会话 |
+| POST | `/api/chat` | user | 问答（SSE） |
+| GET | `/api/admin/stats` | admin | 概览统计 |
+| GET | `/api/admin/documents` | admin | 全部文档 |
+
+> TODO: [待补充] API 版本控制策略（URL 前缀 /v1/ 或 Header 版本号）。
+> TODO: [待补充] 分页规范 — 当前未统一分页参数格式，建议统一为 `{ "items": [], "total": N, "page": N, "page_size": N }`。
+
+---
+
+## 10. 相关文档
+
+- [架构设计文档](../docs/ARCHITECTURE.md)
+- [数据库设计文档](DATABASE.md)
+- [开发指南](../docs/DEVELOPMENT.md)
+- [UI 设计规范](../../frontend/docs/UIDESIGN.md)

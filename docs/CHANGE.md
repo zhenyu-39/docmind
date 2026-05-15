@@ -1,0 +1,685 @@
+# DocMind 变更日志
+
+## 2026-05-15 — 设计修正：KB/文档删除流程统一为物理删除（方案 B）
+
+### 背景
+
+审查发现 KB 删除流程存在设计矛盾：API.md §3 的 Celery 流程写了「批量删除 chunks / documents / kb 记录」，但紧接着标记 `status=deleted`——物理删除后行已不存在，无法 UPDATE。同时 `knowledge_bases.status` ENUM 包含 `'deleted'`，若行永不物理删除，`ON DELETE CASCADE` 外键将成为死代码。
+
+### 决策：方案 B — Celery 异步物理删除 + FK CASCADE 兜底
+
+**核心流程**（KB 级）：
+```
+DELETE /api/knowledge-bases/{id}
+↓ kb.status = deleting → 返回 202
+↓ Celery Worker:
+  1. collection.delete(where={"kb_id": kb_id})   — ChromaDB
+  2. 删除 uploads/{kb_id}/                           — 磁盘文件
+  3. DELETE FROM knowledge_bases WHERE id=?          — MySQL 物理删除
+     └─ FK CASCADE → documents → chunks（兜底）
+```
+**文档级同理**：`status = deleting` → Celery 清理 ChromaDB + 磁盘 → `DELETE FROM documents` → FK CASCADE 清 chunks。
+
+### 修改的文件
+
+| 文件 | 变更内容 |
+|:---|:---|
+| `API.md` | 移除 E1003 错误码；§3 KB 异步清理流程改为物理 DELETE + FK CASCADE；§4.0 DocumentStatus 移除 `DELETED`，TERMINAL_STATUSES 移除 `'deleted'`；§4 文档异步清理流程同步修正 |
+| `DATABASE.md` | §2.2 `knowledge_bases.status` ENUM 移除 `'deleted'`；§2.3 `documents.status` ENUM 移除 `'deleted'`；DocumentStatus 枚举移除 `DELETED`；§4 外键说明改为物理删除为主、FK CASCADE 兜底 |
+| `ARCHITECTURE.md` | §4.0 TERMINAL_STATUSES 移除 `deleted`；§7.1 KB 删除流程描述更新 |
+| `FRONTEND.md` | §6.4 TERMINAL_STATUSES 常量移除 `'deleted'`；§6.5 状态标签映射移除 `deleted` 行 |
+| `UIDESIGN.md` | §4.8 移除 `.status-tag.deleted` CSS 类；图标配对表移除 `deleted` 行 |
+| `CHANGE.md` | 本文档 |
+
+### 代码层面执行（2026-05-15 当天完成）
+
+| # | 位置 | 修改内容 | 状态 |
+|:---|:---|:---|:---|
+| 1 | `requirements.txt` | 删除 `passlib[bcrypt]==1.7.*` + `rank-bm25==0.2.*` | ✅ |
+| 2 | `config.py` | 新增 `CHROMA_BATCH_SIZE=100`、`EMBED_BATCH_SIZE=20`、`DEBUG_CHUNK_FULL=False` | ✅ |
+| 3 | `core/exceptions.py` | 移除 `KnowledgeBaseDeleteFailedException(E1003)`；新增 E2006-E2013 共 8 个异常类 | ✅ |
+| 4 | `models/enums.py` | **新文件**：`DocumentStatus(str, Enum)` 10 值 + `TERMINAL_STATUSES` + `is_terminal()` | ✅ |
+| 5 | `models/document.py` | status ENUM 从 8 值改为 10 值（`uploading→uploaded`、`indexing→vector_storing`，新增 `success_with_warnings`/`partial_failed`/`deleting`，移除 `deleted`）；新增 `file_path`/`current_stage`/`last_success_batch` 字段；新增 `idx_kb_filename` 复合索引 | ✅ |
+| 6 | `models/knowledge_base.py` | 新增 `status` 字段 `Enum('active','deleting')` | ✅ |
+| 7 | `models/__init__.py` | 导出 `DocumentStatus`、`TERMINAL_STATUSES`、`is_terminal` | ✅ |
+| 8 | `api/knowledge_base.py` | 路由骨架（`prefix="/api/knowledge-bases"`） | ✅ |
+| 9 | `api/document.py` | 路由骨架（`prefix="/api/knowledge-bases"`） | ✅ |
+| 10 | `main.py` | 注册 `kb_router` + `doc_router` | ✅ |
+| 11 | `alembic/versions/42097bdbd61a` | 新迁移：documents ENUM 值重命名 + 新增值（含旧数据 UPDATE 适配）+ knowledge_bases.status 新增；已执行 `upgrade head` | ✅ |
+
+### 代码层面仍待处理（Phase 2 实施时）
+
+| # | 位置 | 修改内容 | 优先级 |
+|:---|:---|:---|:---|
+| 12 | `schemas/` | 创建/更新 Pydantic schema 对齐新枚举和字段 | P1 |
+| 13 | `services/` | 实现 KB/文档 CRUD service，使用新的 `DocumentStatus` 枚举 | P1 |
+| 14 | `api/knowledge_base.py` | 实现具体端点 | P1 |
+| 15 | `api/document.py` | 实现具体端点 | P1 |
+| 16 | `ingest/celery_tasks.py` | KB/文档删除任务末尾物理 DELETE（非 UPDATE status） | P0 |
+| 17 | `frontend/` | TERMINAL_STATUSES 常量 + 状态标签映射同步 | P1 |
+
+### 关键决策索引（追加）
+
+| # | 决策 | 文档位置 |
+|:---|:---|:---|
+| 12 | KB/文档删除采用物理删除 + FK CASCADE 兜底，不保留软删除状态 | API.md §3, DATABASE.md §4 |
+
+---
+
+## 2026-05-15 — 响应格式补全：所有成功响应统一 `{code, message, data}`
+
+### 背景
+
+API.md §1.2 已约定「所有成功响应必须包含 `code`、`message`、`data` 三个字段。当前部分接口仅返回 `{code, data}`，Phase 2 起统一补齐 `message` 字段」。经审查发现 7 处接口的成功响应缺少 `message`，本次统一补齐。
+
+### 文档修改（API.md）
+
+| # | 接口 | 补全值 |
+|:---|:---|:---|
+| 1 | POST `/api/auth/register` | `"message": "注册成功"` |
+| 2 | POST `/api/auth/login` | `"message": "登录成功"` |
+| 3 | POST `/api/knowledge-bases` | `"message": "知识库创建成功"` |
+| 4 | GET `/api/knowledge-bases` | `"message": "ok"` |
+| 5 | GET `/api/knowledge-bases/{id}` | 继承创建响应结构（自动补全） |
+| 6 | POST `/api/conversations` | `"message": "会话创建成功"` |
+| 7 | GET `/api/conversations/{id}` | `"message": "ok"` |
+| 8 | GET `/api/admin/stats` | `"message": "ok"` |
+
+### 代码修改（Phase 1 已实现接口）
+
+| 文件 | 变更 |
+|:---|:---|
+| `api/auth.py` | `register` 返回中加入 `"message": "注册成功"`；`login` 返回中加入 `"message": "登录成功"` |
+
+> 其余接口代码尚未实现，Phase 2 实现时按文档直接输出三字段格式。
+
+---
+
+## 2026-05-14 — Phase 2 前置准备：文档全面补全
+
+### 背景
+
+Phase 1 代码骨架完成，Phase 2 启动前对齐全部设计决策，补全所有文档中遗漏的技术细节。
+
+### 修改的文件
+
+| 文件 | 版本变更 | 主要补全内容 |
+|:---|:---|:---|
+| `API.md` | v0.2 → v0.3 | E2006-E2013 错误码、文档状态枚举(11值)、reprocess/batch-upload 接口、force 覆盖流程、DELETE KB 异步清理、chunks 分页、Refresh Token Phase 5 TODO |
+| `DATABASE.md` | v0.2 → v0.3 | `documents.status` 枚举改为 11 值 + `DocumentStatus(str,Enum)` 定义、新增 `file_path`/`current_stage`/`last_success_batch` 字段、`knowledge_bases` 新增 `status` 字段、`idx_kb_filename` 复合索引 |
+| `ARCHITECTURE.md` | v0.2 → v0.3 | §4 文档入库流程完整重写（状态机、幂等锁、批量写入、批次 checkpoint、解析容错分级、chunk_count 事务更新）、§7.1 KB 删除 metadata filter 流程、§7.2 标注 rank-bm25 移除、§7.5 文件路径更新 |
+| `ROADMAP.md` | v0.2 → v0.3 | §3 Phase 2 拆分为 3 个子阶段（后端CRUD 7 项 / Celery流水线 7 项 / 前端 5 项）+ 明确不做的 5 项推迟、§6 Refresh Token 细化 |
+| `FRONTEND.md` | v0.1 → v0.2 | §6 文档管理页扩写（上传交互、同名冲突、轮询策略、11 状态标签映射、上传进度、空状态、分块预览）、§11 已知 TODO 更新为 Phase 分阶段 |
+| `UIDESIGN.md` | v0.2 → v0.3 | §4.8 状态标签从 4 种扩展至 11 种 + 图标配对表 |
+| `CHANGE.md` | — | 本文档 |
+
+### 关键决策索引
+
+| # | 决策 | 文档位置 |
+|:---|:---|:---|
+| 1 | 文档状态机：11 状态 + `TERMINAL_STATUSES` + `is_terminal()` | API.md §4.0, DATABASE.md §2.3 |
+| 2 | Celery 幂等键：`{doc_id}:{task_type}` + Redis 分布式锁 TTL=600s | ARCHITECTURE.md §4.5 |
+| 3 | ChromaDB batch 写入失败清理策略 | ARCHITECTURE.md §4.3 |
+| 4 | 文档唯一性：`(kb_id, filename)` 检查 + `force=true` 覆盖 | API.md §4, ARCHITECTURE.md §4.1 |
+| 5 | 分块策略：RecursiveCharacterTextSplitter（800-1200 chars） | ARCHITECTURE.md §4.2 |
+| 6 | 文件路径：`uploads/{kb_id}/{doc_id}/{uuid}_{sanitized_filename}` | ARCHITECTURE.md §7.5, DATABASE.md §2.3 |
+| 7 | KB 删除：单 Collection metadata filter 异步批量清理 | API.md §3, ARCHITECTURE.md §7.1 |
+| 8 | 解析容错分级：<20% warning / 20-50% partial / >50% failed | ARCHITECTURE.md §4.7 |
+| 9 | 状态轮询：2s 间隔 / 终态停止 / 5 分钟超时 | FRONTEND.md §6.4 |
+| 10 | Embedding 批量：batch_size=20 + 5 次指数退避重试 + 批次 checkpoint | ARCHITECTURE.md §4.4 |
+| 11 | 不支持 .doc 格式 | ROADMAP.md §3.4 |
+
+### 未改动代码
+
+本次仅修正文档，不涉及代码变更。已知待修 Bug（migration `server_default` 字符串字面量、`rank-bm25` 残留依赖）在 Phase 2 实现时一并修复。
+
+---
+
+## 2026-05-13 — Phase 1 交互补漏：登录/退出反馈 + 用户栏行为修正
+
+### 文档补充（FRONTEND.md）
+
+| 位置 | 补充内容 |
+|:---|:---|
+| §3.2 登录流程 | 成功步骤增加 `ElMessage.success('登录成功')` 反馈 |
+| §4.1 页面布局 | Sidebar 底部区域描述细化：头像点击→个人资料（预留）、退出按钮→提示+跳转 |
+| §4.5.1 用户栏行为（新增） | 用户栏交互行为表：头像预留 / 退出图标 → toast + 跳转 |
+| §8.2 表单反馈 | 新增「退出登录」「登录成功」两行交互规范 |
+
+### 修复
+
+| 问题 | 修复前 | 修复后 |
+|:---|:---|:---|
+| 点击头像区域也退出登录 | `@click="handleLogout"` 挂在 `.user-bar` 容器上 | 仅退出图标按钮绑定 `@click.stop`，头像/用户名区域无操作（预留个人资料入口） |
+| 退出登录无反馈 | 静默跳转 `/login` | `ElMessage.success('已退出登录')` → 跳转 |
+| 登录成功无反馈 | 静默跳转 `/chat` | `ElMessage.success('登录成功')` → 跳转 |
+
+### 修改文件
+
+| 文件 | 说明 |
+|:---|:---|
+| `frontend/src/components/layout/Sidebar.vue` | 移除 `.user-bar` 退出点击，仅退出图标触发；新增 `ElMessage` 退出反馈 |
+| `frontend/src/views/LoginPage.vue` | 新增 `ElMessage.success('登录成功')` |
+
+---
+
+## 2026-05-13 — Phase 1 收尾：前端布局框架（AppLayout + Sidebar）
+
+### 新增
+
+| 文件 | 说明 |
+|:---|:---|
+| `frontend/src/components/layout/Sidebar.vue` | 侧边栏组件：Logo + 新建对话按钮 + 会话列表空态 + 管理导航（admin可见）+ 用户信息栏 + 退出登录 |
+| `frontend/src/components/layout/AppLayout.vue` | 布局容器：左侧 Sidebar + 右侧主内容区（顶部 header + `<slot />`） |
+
+### 修改
+
+| 文件 | 说明 |
+|:---|:---|
+| `frontend/src/App.vue` | 路由感知布局切换：公开页面（login）独立渲染，认证页面包裹 AppLayout |
+
+### 组件结构
+
+```
+App.vue
+├── /login → LoginPage（独立渲染，全屏渐变背景）
+└── 其他路由 → AppLayout
+                ├── Sidebar（280px）
+                │   ├── 顶部：Logo（DocMind）+ 新建对话按钮
+                │   ├── 中间：会话列表空态 + 管理导航（admin）
+                │   └── 底部：用户头像/用户名/角色 + 退出按钮
+                └── 主内容区
+                    ├── Top Header（页面标题）
+                    └── <slot />（router-view 页面内容）
+```
+
+### Phase 1 完成状态
+
+| 任务 | 状态 |
+|:---|:---|
+| 项目初始化 | ✅ |
+| 前端环境搭建 | ✅ |
+| Git 初始化 | ✅ |
+| MySQL 表建好 | ✅ |
+| ChromaDB 连接 | ✅ |
+| JWT 认证 | ✅ |
+| 前端登录页 | ✅ |
+| 前端布局框架 | ✅ |
+
+Phase 1 骨架搭建全部完成，可进入 Phase 2 文档入库开发。
+
+---
+
+## 2026-05-13 — 错误响应格式统一（AppException 去嵌套）
+
+### 修复
+
+`AppException` 继承 `HTTPException`，FastAPI 默认 handler 会将其 `detail` dict 再包一层 `{"detail": {...}}`，而 `AuthMiddleware` 直接构造 `JSONResponse` 返回扁平格式 `{code, message, detail}`，导致前后端错误响应格式不统一。
+
+- **`backend/app/main.py`** — 新增 `@app.exception_handler(AppException)`，直接返回 `JSONResponse` 扁平格式，与中间件响应一致
+- **`frontend/src/views/LoginPage.vue`** — 错误处理从双路径兼容（`data.detail.message` / `data.message`）简化为单一路径 `data?.message`
+
+### 影响
+
+此后所有 `AppException` 子类（20 个错误码）抛出的错误响应均为扁平格式 `{"code":"Exxxx","message":"...","detail":"..."}`，与 `AuthMiddleware`、`RequestValidationError` handler、通用 `Exception` handler 保持一致。
+
+---
+
+## 2026-05-13 — Phase 1: 前端登录页交互修复
+
+### 修复
+
+根据 FRONTEND.md §3.2 交互流程、§3.3 表单校验规则及 §8.2 表单反馈规范，修正 LoginPage.vue 三处问题：
+
+| 问题 | 修复前 | 修复后 |
+|:---|:---|:---|
+| Tab 切换不清空表单 | `switchMode` 仅重置 `errorMsg` | 同时清空 `username`、`password`、`errorMsg` |
+| 用户名长度校验缺失 | 仅校验非空 | 新增 `length ≥ 2` 校验，提示「用户名至少 2 个字符」 |
+| 注册成功无反馈 | 静默切换至登录模式 | `ElMessage.success('注册成功，请登录')` |
+
+### 修改
+
+- **`frontend/src/views/LoginPage.vue`** — 上述 3 处修复，并新增 `import { ElMessage } from 'element-plus'`
+
+---
+
+## 2026-05-13 — Phase 1: 前端登录页 + 路由 + 全局样式
+
+### 新增
+
+| 文件 | 说明 |
+|:---|:---|
+| `frontend/src/styles/global.css` | 全局 CSS 变量（Design Token）+ 重置样式 + 组件基础样式，严格对齐 UIDESIGN.md §1-2 |
+| `frontend/src/views/LoginPage.vue` | 登录/注册页，含渐变背景、Logo、Tab 切换、表单验证、错误提示，样式对齐 UIDESIGN.md |
+| `frontend/src/router/index.js` | Vue Router 配置，含路由守卫（公开/认证/管理员三级权限），懒加载页面 |
+| `frontend/src/stores/auth.js` | Pinia 认证状态管理（login/register/logout），JWT 解析 + localStorage 持久化 |
+| `frontend/src/api/index.js` | Axios 实例 + 请求拦截器（Bearer Token）+ 响应拦截器（401 跳转登录页） |
+| `frontend/src/api/auth.js` | 认证 API 封装（register/login） |
+
+### 修改
+
+| 文件 | 说明 |
+|:---|:---|
+| `frontend/index.html` | 添加 Font Awesome 6.5.1 CDN 链接 |
+| `frontend/src/main.js` | 导入 `global.css` |
+| `frontend/vite.config.js` | 添加 `@` 路径别名（→ `./src`） |
+| `frontend/src/views/admin/*.vue` | 填充占位 `<template>`，修复空文件导致构建失败 |
+| `frontend/src/views/ChatPage.vue` | 同上，填充占位内容 |
+
+### 路由设计
+
+| 路径 | 页面 | 权限 |
+|:---|:---|:---|
+| `/login` | LoginPage | 公开（已登录自动跳转 `/chat`） |
+| `/chat` | ChatPage | 需登录 |
+| `/admin/documents` | DocumentList | 需管理员 |
+| `/admin/conversations` | ConversationList | 需管理员 |
+| `/admin/knowledge` | KnowledgeList | 需管理员 |
+| `/` | — | 重定向 `/chat` |
+
+### 数据流
+
+```
+LoginPage → authStore.login() → api/auth.js POST /api/auth/login
+           → 解析 JWT payload → localStorage 持久化 → router.push('/chat')
+
+LoginPage → authStore.register() → api/auth.js POST /api/auth/register
+           → 注册成功 → 切换至登录模式
+```
+
+---
+
+## 2026-05-12 — Phase 1 代码规范修正 & 模型外键补齐
+
+### 修改
+
+- **相对导入 → 绝对导入** — `core/database.py`、`core/chroma_client.py`、`main.py`、`models/__init__.py` 全部改为 `from app.xxx` 绝对路径
+- **`core/security.py`** — `datetime.utcnow()` → `datetime.now(timezone.utc)`，避免弃用 API
+- **`middleware/auth_middleware.py`** — `int(payload.get("sub"))` 增加 `KeyError/ValueError/TypeError` 异常防护，返回 401 而非 500
+- **`middleware/auth_middleware.py`** — 移除 `_PUBLIC_PATHS` 中 `/docs`、`/openapi.json` 的重复 `startswith` 判断（`in` 集合 + `startswith` 提取为 `_is_public()` 函数）
+- **`main.py`** — 注册全局异常处理器：`RequestValidationError`（422 → E9003）+ `Exception`（500 → E9001），统一响应格式 `{code, message, detail}`
+
+### 新增
+
+- **6 张模型表补充 `sa.ForeignKey(...)`** — 对齐 DATABASE.md §4 外键策略，全部 7 条外键约束：
+  | 字段 | 引用 | ondelete |
+  |:---|:---|:---|
+  | `knowledge_bases.user_id` | `users.id` | RESTRICT |
+  | `documents.kb_id` | `knowledge_bases.id` | CASCADE |
+  | `chunks.doc_id` | `documents.id` | CASCADE |
+  | `chunks.kb_id` | `knowledge_bases.id` | CASCADE |
+  | `conversations.user_id` | `users.id` | CASCADE |
+  | `conversations.kb_id` | `knowledge_bases.id` | SET NULL |
+  | `messages.conversation_id` | `conversations.id` | CASCADE |
+
+- **6 张模型表补充 `relationship`** — User ↔ KB ↔ Document ↔ Chunk / User ↔ Conversation ↔ Message 双向关联
+- **`server_default=sa.text('0')`** — `chunk_count`（KB/Document）、`doc_count`（KB）、`token_count`（Chunk/Message）、`message_count`（Conversation）添加 DB 层默认值
+
+### 数据库迁移
+
+- **`252a79df66dd`** — 添加 7 条外键约束 + 6 列 server_default 修改，已执行 `alembic upgrade head`
+
+---
+
+## 2026-05-12 — Phase 1: JWT 认证（注册/登录 + 中间件 + 异常类）
+
+### 新增
+
+- **`core/exceptions.py`** — 统一异常类体系，覆盖 API.md §1.3 全部 20 个错误码
+  - E1xxx 知识库（3）、E2xxx 文档（5）、E3xxx 会话（2）、E4xxx 问答（5）、E5xxx 认证（5）、E9xxx 系统（4）
+  - 基类 `AppException(HTTPException)` 携带统一响应格式 `{code, error: {code, message, detail}}`
+- **`core/security.py`** — JWT + 密码哈希（bcrypt 直调，未使用 passlib 以避免兼容性问题）
+  - `hash_password` / `verify_password` / `create_access_token` / `decode_access_token`
+- **`schemas/auth.py`** — RegisterRequest / LoginRequest / UserResponse / TokenResponse
+- **`services/auth_service.py`** — register（查重+创建） / login（验证+签发 token）
+- **`api/auth.py`** — POST /api/auth/register + POST /api/auth/login
+- **`middleware/auth_middleware.py`** — 纯 ASGI 中间件，从 Authorization Bearer 提取 JWT，验证后写入 request.state；OPTIONS 放行；公开路由白名单
+- **`dependencies.py`** — 新增 `get_current_user(request)` 从 request.state 读取已认证用户
+- **`main.py`** — 注册 AuthMiddleware + auth_router
+
+### 修改
+
+- **`requirements.txt`** — 新增 `bcrypt==4.0.*`（pin 版本兼容 passlib 替代方案）
+
+### 验证
+
+| 场景 | 结果 |
+|:---|:---|
+| 注册 | 201 Created，返回用户信息 |
+| 登录 | 200 OK，返回 access_token（HS256，24h）+ expires_in |
+| 重复注册 | 409 Conflict，E5001「用户名已存在」 |
+| 密码错误 | 401 Unauthorized，E5002「用户名或密码错误」 |
+| 无 Token | 401 Unauthorized，E5004「Token 无效或格式错误」 |
+| 有效 Token | 中间件放行，进入路由（返回 404 因路由未实现） |
+
+### 修复
+
+- **错误响应格式** — 外层 `"code": 0` 改为实际错误码（如 `"code": "E5001"`），去掉嵌套的 `error` 包裹层
+  - `API.md` §1.2 — 错误响应示例从 `{code: 0, error: {code: "E1001", ...}}` 改为 `{code: "E1001", message: "...", detail: "..."}`
+  - `core/exceptions.py` — `AppException` 响应体同步改为扁平结构
+  - `middleware/auth_middleware.py` — 两处 `JSONResponse` 同步修正
+
+---
+
+## 2026-05-12 — Phase 1: ChromaDB 连接 & collection 创建
+
+### 新增
+
+- **`core/chroma_client.py`** — ChromaDB PersistentClient 连接管理
+  - `init_chroma()` — 初始化 PersistentClient，获取或创建 `docmind` collection
+  - `get_collection()` / `get_client()` — 获取全局单例
+  - Collection 使用 `hnsw:space=cosine` 余弦相似度
+  - 持久化目录：`CHROMA_PERSIST_DIR`（.env 配置，默认 `./chroma_data`）
+- **`main.py`** — lifespan 启动时调用 `init_chroma()` 初始化 ChromaDB
+
+### 验证
+
+- Collection `docmind` 创建成功，count = 0
+- `chroma.sqlite3` 持久化文件生成在 `backend/chroma_data/`
+- FastAPI 启动正常，`/api/health` 返回 200
+
+---
+
+## 2026-05-11 — 设计文档更新: Embedding 方案切换为 DashScope
+
+### 修改
+
+- **CLAUDE.md** — 技术栈行: `text-embedding-3-small` → `DashScope text-embedding-v3`，LLM 标注为 DeepSeek
+- **DESIGN.md §2** — 技术选型表 Embedding 行: `OpenAI text-embedding-3-small / 1536维` → `DashScope text-embedding-v3 / 1024维，中文优化`
+- **DESIGN.md §9** — .env 模板 Embedding 段: URL 改为 `dashscope.aliyuncs.com/api/v1`，MODEL 改为 `text-embedding-v3`
+
+---
+
+## 2026-05-11 — Phase 1: 数据库连接 & ORM 模型 & Alembic 迁移
+
+### 操作概述
+
+按照 `DESIGN.md` §4 表结构和 §6 项目结构，完成 MySQL 数据库连接配置、全部 6 张表的 SQLAlchemy 模型、Alembic 异步迁移环境和首次迁移脚本。
+
+### 环境变量配置
+
+- **`.env`** — 从项目根目录移至 `backend/.env`，pydantic-settings 自动从 CWD 读取
+- **`config.py`** — `Settings(BaseSettings)` 声明全部字段，`.env` 变量自动映射覆盖默认值，提供 `mysql_url` 计算属性拼接异步连接串
+
+### 数据库连接 (`core/database.py`)
+
+- `engine` — `create_async_engine(settings.mysql_url, pool_size=10, max_overflow=20)`
+- `async_session` — `async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)`
+- `Base` — `DeclarativeBase` 所有 ORM 模型基类
+
+### SQLAlchemy 模型（6 张表，对齐 DESIGN.md §4.2）
+
+| 模型 | 表名 | 关键字段 |
+|---|---|---|
+| `User` | `users` | id, username(unique), password_hash, role(Enum: user/admin), created_at, updated_at |
+| `KnowledgeBase` | `knowledge_bases` | id, name, description, user_id, chunk_count, doc_count, created_at, updated_at |
+| `Document` | `documents` | id, kb_id(索引), filename, file_type, file_size, status(Enum: uploading→failed), chunk_count, error_msg, created_at, updated_at |
+| `Chunk` | `chunks` | id, doc_id(索引), kb_id(索引), chroma_id, content, chunk_index, token_count, metadata(JSON), created_at |
+| `Conversation` | `conversations` | id, user_id(索引), kb_id, title, message_count, created_at, updated_at |
+| `Message` | `messages` | id, conversation_id(索引), role(Enum: user/assistant/system), content, thinking_content, token_count, feedback(Enum: like/dislike), created_at |
+
+- 全部使用 SQLAlchemy 2.0 Mapped 类型注解写法
+- Enum 使用 SQL 原生 ENUM 类型
+- `created_at` 使用 `server_default=func.current_timestamp()`
+- `updated_at` 额外设置 `onupdate=func.current_timestamp()`
+- `models/__init__.py` 导入全部模型供 Alembic 发现
+
+### 依赖注入 (`dependencies.py`)
+
+- `get_db()` — `AsyncGenerator[AsyncSession]`，每次请求获取独立 session，成功自动 commit，异常自动 rollback
+
+### Alembic 异步迁移环境
+
+- **`alembic.ini`** — 基本配置（URL 由 env.py 运行时从 config.py 读取，避免硬编码）
+- **`alembic/env.py`** — 异步引擎 + 自动发现模型，支持 offline（生成 SQL）和 online（直连 DB）两种模式
+- **首次迁移** — `alembic/versions/7588fa83e017_初始化建表.py`，包含全部 6 张表的 DDL（用户手动执行 `alembic upgrade head` 成功）
+- 注意：`alembic revision --autogenerate` 因 aiomysql 连接在事件循环关闭后清理报错（`RuntimeError: Event loop is closed`），迁移脚本已生成但需手动执行 upgrade
+
+### FastAPI 入口 (`main.py`)
+
+- `lifespan` 上下文管理器（当前为空，后续注册资源初始化）
+- CORS 中间件（开发阶段允许 localhost:5173）
+- `/api/health` 健康检查路由
+
+### 版本修正
+
+- **`requirements.txt`** — 版本号对齐 DESIGN.md §10（fastapi 0.115, uvicorn 0.32, aiomysql 0.2, python-jose 3.3, celery 5.4, alembic 1.14 等）
+
+### 修复
+
+- **`dependencies.py`** — 导入路径 `from core.database` → `from app.core.database`（绝对导入）
+- **`main.py`** — 导入路径 `from config` → `from app.config`（绝对导入）
+
+### 验证
+
+- `.env` 配置正确加载（DeepSeek + DashScope 凭证）
+- 6 个模型全部导入成功，表结构打印验证通过
+- Alembic `--autogenerate` 检测到 6 张表 + 4 个索引，生成迁移脚本后由用户手动 `alembic upgrade head` 完成建表
+
+### 统计
+
+| 操作 | 数量 |
+|:---|:---|
+| 新增/重写文件 | 13 |
+| 模型 | 6 张表 |
+| 迁移脚本 | 1 |
+
+### 后续步骤（按 DESIGN.md Phase 1）
+
+- [x] MySQL 表建好（SQLAlchemy models） ✅
+- [ ] ChromaDB 连接 & collection 管理
+- [ ] JWT 认证（注册/登录）
+- [ ] 前端登录页 + 路由骨架
+
+---
+
+## 2026-05-10 — Phase 1: 脚手架提交 & 分支拆分
+
+### 操作概述
+
+提交全部脚手架文件到 main，并创建前后端独立开发分支。
+
+### 操作记录
+
+```
+git add .gitignore CHANGE.md DESIGN.md backend/ frontend/
+git commit -m "feat: project scaffold — FastAPI backend + Vue3 frontend"
+git push origin main
+
+git branch dev-backend
+git branch dev-frontend
+git push origin dev-backend dev-frontend
+```
+
+### 提交详情
+
+- Commit: `90993f7`
+- 文件数: 83 files changed
+- 内容: 后端 50 + 前端 26 + 根目录 7 个文件
+
+### 分支策略
+
+```
+main          ← 稳定主分支（受保护）
+├── dev-backend   ← 后端开发分支
+└── dev-frontend  ← 前端开发分支
+```
+
+### 后续步骤（按 DESIGN.md Phase 1）
+
+- [ ] MySQL 表建好（SQLAlchemy models）
+- [ ] ChromaDB 连接 & collection 管理
+- [ ] JWT 认证（注册/登录）
+- [ ] 前端登录页 + 路由骨架
+
+---
+
+## 2026-05-10 — Phase 1: 前端环境搭建
+
+### 操作概述
+
+根据用户确认的技术选型补充 DESIGN.md 前端章节，随后搭建前端运行环境并验证。
+
+### DESIGN.md 更新
+
+**§2 技术选型** — 前端行拆分为明细条目：
+- 前端框架 → Vue 3 + Vite
+- UI 组件库 → Element Plus
+- 状态管理 → Pinia
+- 路由 → Vue Router 4
+- HTTP 客户端 → Axios
+- Markdown 渲染 → markdown-it
+- 包管理器 → npm
+- 前端语言 → JavaScript（非 TypeScript）
+
+**§6 项目结构** — 所有 `.ts` 扩展名改为 `.js`
+
+**§10.1** — 新增前端 npm 依赖清单
+
+### 文件变更
+
+**重命名（12 个）：**
+- `src/api/*.ts` → `src/api/*.js`（5 个文件）
+- `src/stores/*.ts` → `src/stores/*.js`（3 个文件）
+- `src/router/index.ts` → `src/router/index.js`
+- `src/utils/*.ts` → `src/utils/*.js`（2 个文件）
+- `vite.config.ts` → `vite.config.js`
+
+**新创建（3 个）：**
+- `package.json` — npm 依赖声明（vue 3.5, element-plus 2.9, pinia 2.3, vue-router 4.5, axios 1.7, markdown-it 14.1, vite 6, @vitejs/plugin-vue 5.2）
+- `vite.config.js` — Vite 配置（Vue 插件 + `/api` 代理到 localhost:8000）
+- `index.html` — 入口 HTML（zh-CN, 挂载 #app）
+
+**新增 bootstrap 文件（2 个，环境必需）：**
+- `src/main.js` — Vue 应用入口（createApp + Pinia + Router + ElementPlus）
+- `src/App.vue` — 根组件（仅 `<router-view />`）
+
+### npm 依赖安装
+
+```
+npm install → 89 packages added
+```
+
+已安装核心包：vue, vue-router, pinia, element-plus, axios, markdown-it, @vitejs/plugin-vue, vite
+
+### 验证
+
+- Vite 开发服务器正常启动（端口 5173）
+- HTTP 200 响应正常
+
+### 统计
+
+| 操作 | 数量 |
+|:---|:---|
+| DESIGN.md 更新 | 3 处（§2, §6, §10.1） |
+| 文件重命名 | 12 |
+| 新创建文件 | 5 |
+| npm 包安装 | 89 |
+
+### 后续步骤（按 DESIGN.md Phase 1）
+
+- [ ] MySQL 表建好（SQLAlchemy models）
+- [ ] ChromaDB 连接 & collection 管理
+- [ ] JWT 认证（注册/登录）
+- [ ] 前端登录页 + 路由骨架
+
+---
+
+## 2026-05-10 — Phase 1: Git 版本控制初始化
+
+### 操作概述
+
+建立 Git 仓库并推送至 GitHub 远程仓库。
+
+### 操作记录
+
+```
+echo "# docmind" > README.md        # 创建项目 README
+git init                            # 初始化 Git 仓库
+git add README.md                   # 暂存 README
+git commit -m "first commit"        # 首次提交（仅 README.md）
+git branch -M main                  # 默认分支 master → main
+git remote add origin \
+  https://github.com/zhenyu-39/docmind.git
+git push -u origin main             # 推送至远程
+```
+
+### .gitignore 补充
+
+在 Git 初始化前，根据前端环境（Vite + Vue）补充了 `.gitignore` 规则：
+- `*.local` — Vite 本地环境变量文件
+- `.vite/` — Vite 开发服务器缓存
+- `frontend/dist/` — 生产构建产物
+
+### 当前状态
+
+- 远程仓库: `https://github.com/zhenyu-39/docmind.git`
+- 默认分支: `main`
+- 首次提交: `568de74` (仅 README.md)
+- 待提交: `.gitignore`, `DESIGN.md`, `CHANGE.md`, `backend/`, `frontend/`（脚手架文件）
+
+---
+
+## 2026-05-10 — Phase 1: 项目初始化（目录脚手架）
+
+### 操作概述
+
+严格按照 `DESIGN.md` §6 项目结构定义，创建完整的目录脚手架和空占位文件。**所有文件均为空占位文件，未写入任何实现代码。**
+
+### 后端目录 (`backend/`)
+
+**目录创建：**
+- `backend/app/` — FastAPI 应用根目录
+- `backend/app/api/` — API 路由层（7 个占位文件）
+- `backend/app/models/` — SQLAlchemy 数据模型（7 个占位文件）
+- `backend/app/schemas/` — Pydantic 请求/响应模型（6 个占位文件）
+- `backend/app/services/` — 业务逻辑层（6 个占位文件）
+- `backend/app/rag/` — RAG 核心模块（8 个占位文件）
+- `backend/app/ingest/` — 文档入库任务模块（3 个占位文件）
+- `backend/app/core/` — 基础设施层（7 个占位文件）
+- `backend/app/middleware/` — 中间件（2 个占位文件）
+- `backend/knowledge_samples/` — 示例知识库文档目录（空）
+- `backend/alembic/` — 数据库迁移目录（空）
+
+**根级文件：**
+- `backend/requirements.txt` — 依赖清单（空）
+- `backend/alembic.ini` — Alembic 配置（空）
+
+### 前端目录 (`frontend/`)
+
+**目录创建：**
+- `frontend/src/views/` — 页面组件（3 个占位文件）
+- `frontend/src/views/admin/` — 管理后台页面（3 个占位文件）
+- `frontend/src/components/chat/` — 聊天相关组件（4 个占位文件）
+- `frontend/src/components/layout/` — 布局组件（2 个占位文件）
+- `frontend/src/stores/` — Pinia 状态管理（3 个占位文件）
+- `frontend/src/api/` — HTTP 请求封装（5 个占位文件）
+- `frontend/src/router/` — 路由配置（1 个占位文件）
+- `frontend/src/utils/` — 工具函数（2 个占位文件）
+
+**根级文件：**
+- `frontend/index.html` — 入口 HTML（空）
+- `frontend/package.json` — 依赖清单（空）
+- `frontend/vite.config.ts` — Vite 配置（空）
+
+### 项目根目录
+
+- `.gitignore` — Git 忽略规则（已配置 Python / Node / IDE / 环境变量等规则）
+
+### 统计
+
+| 类别 | 数量 |
+|:---|:---|
+| 后端目录 | 10 |
+| 后端占位文件 | 50 |
+| 前端目录 | 9 |
+| 前端占位文件 | 26 |
+| 根目录文件 | 1 (.gitignore) |
+| **总计新增** | **96 项** |
+
+### 后续步骤（按 DESIGN.md Phase 1）
+
+- [ ] MySQL 表建好（SQLAlchemy models）
+- [ ] ChromaDB 连接 & collection 管理
+- [ ] JWT 认证（注册/登录）
+- [ ] 前端登录页 + 路由骨架
