@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |:---|:---|
-| 文档版本 | v0.3 |
-| 最后更新 | 2026-05-15 |
+| 文档版本 | v0.4 |
+| 最后更新 | 2026-05-16 |
 | 作者 | yuz |
 | 状态 | 草稿 |
 
@@ -213,8 +213,7 @@ source venv/bin/activate    # Linux/Mac
 pip install -r requirements.txt
 
 # 3. 配置 .env
-cp .env.example .env        # 如有模板文件
-# 编辑 .env，填入 MySQL/Redis/LLM/Embedding 的凭证
+# 在 backend/ 目录下创建 .env 文件，参考下方 §4 环境变量章节填入凭证
 
 # 4. 执行数据库迁移
 alembic upgrade head
@@ -318,7 +317,7 @@ chromadb==0.5.*
 langchain==0.3.*
 langchain-community==0.3.*
 langchain-openai==0.2.*
-rank-bm25==0.2.*
+jieba==0.42.*
 unstructured==0.16.*
 PyPDF2==3.0.*
 python-docx==1.1.*
@@ -336,7 +335,7 @@ pytest-cov==5.*
 httpx==0.28.*
 ```
 
-> 注：`rank-bm25` 保留用于快速原型验证，正式实现替换为 jieba + 自定义 BM25（见 [ARCHITECTURE.md §7.2](ARCHITECTURE.md#72-bm25-实现方案)）。
+> 注：BM25 关键词检索使用 `jieba` 分词 + 自定义 BM25 实现（见 [ARCHITECTURE.md §7.2](ARCHITECTURE.md#72-bm25-实现方案)）。
 
 ---
 

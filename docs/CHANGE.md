@@ -1,5 +1,59 @@
 # DocMind 变更日志
 
+## 2026-05-16 — 文档规范修复 + 代码合规修复
+
+### 背景
+
+对照 CLAUDE.md 强制约定和 API.md/UIdesign.md 规范，发现多处代码与文档不一致：模型字段缺少 `server_default`、前端组件硬编码颜色、LoginRequest 缺少最小长度校验、auth 响应 `code` 为整数而非字符串。同时修复了文档集自身的 19 项矛盾/缺失。
+
+### 文档修改
+
+| 文件 | 版本变更 | 主要变更 |
+|:---|:---|:---|
+| `backend/docs/API.md` | v0.3 → v0.4 | §1.2 成功响应 code 统一为字符串 `"0"`，删除过期注释；§1.3 E1xxx/E2xxx 间补空行；§3/§5/§7 补充 PUT KB、DELETE 会话、GET admin/documents 响应示例；§6 新增 SSE vs HTTP JSON 错误流程区分说明；§8.2 错误响应从旧嵌套格式改为扁平 `{code, message, detail}`；§9 删除分页/API 版本 TODO |
+| `docs/ROADMAP.md` | v0.3 → v0.4 | 文件头版本/日期更新；§2.1 Phase 1 测试全部标记为 ✅ |
+| `docs/TEST_CASES.md` | v0.1 → v0.2 | A3.x 文档 API 路径补全为 `/api/knowledge-bases/{kb_id}/documents/*`；A3.1 状态码 202→201；U3.5/A1.9 更新为 LoginRequest 有 min_length 的预期行为 |
+| `docs/TESTING.md` | v0.2 → v0.3 | §5 子节编号 2.1/2.2 → 5.1/5.2 |
+| `docs/DEVELOPMENT.md` | v0.3 → v0.4 | §5 移除 `rank-bm25==0.2.*`，替换为 `jieba==0.42.*`；§3.1 移除 `cp .env.example` 步骤 |
+| `docs/CHANGE.md` | — | 错误码数量描述 20→31，子类计数同步更新 |
+| `frontend/docs/UIDESIGN.md` | v0.3 → v0.4 | §4.6/§4.8 硬编码颜色全部替换为 `--dm-*` 变量；§1 新增 `--dm-primary-hover-light`、`--dm-logo-shadow` Token |
+| `frontend/docs/FRONTEND.md` | v0.2 → v0.3 | §2.1 路由表补充 `/ → /chat` 重定向条目 |
+| `README.md` | — | 末尾静态日期改为「见各文档元信息」 |
+
+### 代码修改
+
+| 文件 | 修改 |
+|:---|:---|
+| `backend/app/models/user.py` | `role` 字段新增 `server_default=text("'user'")` |
+| `backend/app/models/document.py` | `status` 字段新增 `server_default=text("'uploaded'")` |
+| `backend/app/models/conversation.py` | `title` 字段新增 `server_default=text("'新对话'")` |
+| `backend/app/schemas/auth.py` | `LoginRequest` username 新增 `min_length=2`，password 新增 `min_length=6`，与 `RegisterRequest` 和 `FRONTEND.md §3.3` 对齐 |
+| `backend/app/api/auth.py` | 注册/登录接口 `"code": 0` → `"code": "0"`，与 `API.md §1.2` 字符串格式统一 |
+| `backend/requirements.txt` | 新增 `jieba==0.42.*` |
+| `frontend/src/styles/global.css` | 新增 `--dm-primary-hover-light` 和 `--dm-logo-shadow` Design Token |
+| `frontend/src/components/layout/Sidebar.vue` | L160 `#DDD6FE` → `var(--dm-primary-hover-light)` |
+| `frontend/src/views/LoginPage.vue` | L167 硬编码 `box-shadow` → `var(--dm-logo-shadow)` |
+
+### 数据库迁移
+
+| 迁移文件 | 版本链 | 变更 |
+|:---|:---|:---|
+| `04b3e0425da8_补充user_role_document_status_.py` | `42097bdbd61a` → `04b3e0425da8` | `users.role` SET DEFAULT `'user'`；`documents.status` SET DEFAULT `'uploaded'`（幂等）；`conversations.title` SET DEFAULT `'新对话'` |
+
+### 测试修改
+
+| 文件 | 修改 |
+|:---|:---|
+| `backend/tests/test_schemas.py` | `test_empty_username_accepted` → `test_empty_username_rejected`，预期 `ValidationError` |
+| `backend/tests/test_auth_api.py` | 空用户名测试预期 422 + E9003；错误密码测试改为 ≥6 字符；`code == 0` → `code == "0"` |
+
+### 测试结果
+
+- 后端：44/44 全部通过 ✅
+- 前端：2 文件 23 测试全部通过 ✅
+
+---
+
 ## 2026-05-15 — 测试体系补全：测试策略增强 + Phase 1 测试用例
 
 ### 背景
@@ -315,7 +369,7 @@ Phase 1 骨架搭建全部完成，可进入 Phase 2 文档入库开发。
 
 ### 影响
 
-此后所有 `AppException` 子类（20 个错误码）抛出的错误响应均为扁平格式 `{"code":"Exxxx","message":"...","detail":"..."}`，与 `AuthMiddleware`、`RequestValidationError` handler、通用 `Exception` handler 保持一致。
+此后所有 `AppException` 子类（31 个错误码）抛出的错误响应均为扁平格式 `{"code":"Exxxx","message":"...","detail":"..."}`，与 `AuthMiddleware`、`RequestValidationError` handler、通用 `Exception` handler 保持一致。
 
 ---
 
@@ -419,8 +473,8 @@ LoginPage → authStore.register() → api/auth.js POST /api/auth/register
 
 ### 新增
 
-- **`core/exceptions.py`** — 统一异常类体系，覆盖 API.md §1.3 全部 20 个错误码
-  - E1xxx 知识库（3）、E2xxx 文档（5）、E3xxx 会话（2）、E4xxx 问答（5）、E5xxx 认证（5）、E9xxx 系统（4）
+- **`core/exceptions.py`** — 统一异常类体系，覆盖 API.md §1.3 全部 31 个错误码
+  - E1xxx 知识库（2）、E2xxx 文档（13）、E3xxx 会话（2）、E4xxx 问答（5）、E5xxx 认证（5）、E9xxx 系统（4）
   - 基类 `AppException(HTTPException)` 携带统一响应格式 `{code, error: {code, message, detail}}`
 - **`core/security.py`** — JWT + 密码哈希（bcrypt 直调，未使用 passlib 以避免兼容性问题）
   - `hash_password` / `verify_password` / `create_access_token` / `decode_access_token`

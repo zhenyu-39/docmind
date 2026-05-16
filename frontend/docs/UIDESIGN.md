@@ -3,8 +3,8 @@
 
 # DocMind UI 样式规范
 
-> 版本: v0.3
-> 日期: 2026-05-14
+> 版本: v0.4
+> 日期: 2026-05-16
 > 用途: 面向 Agent 的 CSS 变量与组件样式参考
 > 说明: 所有样式基于 Vue 3 + Element Plus 项目
 
@@ -20,6 +20,7 @@
     --dm-primary: #4F46E5;
     --dm-primary-hover: #4338CA;
     --dm-primary-light: #EEF2FF;
+    --dm-primary-hover-light: #DDD6FE;
     --dm-primary-gradient: linear-gradient(135deg, #4F46E5, #7C3AED);
 
     /* ===== 语义色 ===== */
@@ -111,6 +112,7 @@
     --dm-shadow-xl: 0 20px 50px rgba(0, 0, 0, 0.25);
     --dm-shadow-primary: 0 4px 12px rgba(79, 70, 229, 0.25);
     --dm-shadow-primary-lg: 0 8px 20px rgba(79, 70, 229, 0.3);
+    --dm-logo-shadow: 0 8px 24px rgba(79, 70, 229, 0.25);
     --dm-shadow-sidebar: 2px 0 8px rgba(0, 0, 0, 0.04);
     --dm-shadow-input: 0 4px 20px rgba(0, 0, 0, 0.06);
     --dm-shadow-input-focus: 0 4px 20px rgba(79, 70, 229, 0.1);
@@ -720,7 +722,7 @@ body {
 .thinking-title {
     font-size: var(--dm-text-2xs);               /* 12px */
     font-weight: var(--dm-weight-semibold);
-    color: #B45309;
+    color: var(--dm-text-primary);
     margin-bottom: 6px;
     display: flex;
     align-items: center;
@@ -729,7 +731,7 @@ body {
 
 .thinking-content {
     font-size: var(--dm-text-xs);                /* 13px */
-    color: #92400E;
+    color: var(--dm-text-secondary);
     line-height: 1.6;
 }
 ```
@@ -805,23 +807,23 @@ body {
 
 /* 非终态 — 处理中（蓝色系） */
 .status-tag.uploaded       { background: var(--dm-info-light);    color: var(--dm-info); }
-.status-tag.parsing        { background: #DBEAFE; color: #2563EB; }
-.status-tag.chunking       { background: #DBEAFE; color: #2563EB; }
-.status-tag.embedding      { background: #DBEAFE; color: #2563EB; }
-.status-tag.vector_storing { background: #DBEAFE; color: #2563EB; }
+.status-tag.parsing        { background: var(--dm-info-light);    color: var(--dm-info); }
+.status-tag.chunking       { background: var(--dm-info-light);    color: var(--dm-info); }
+.status-tag.embedding      { background: var(--dm-info-light);    color: var(--dm-info); }
+.status-tag.vector_storing { background: var(--dm-info-light);    color: var(--dm-info); }
 
 /* 终态 — 成功（绿色系） */
 .status-tag.completed              { background: var(--dm-success-light); color: var(--dm-success); }
-.status-tag.success_with_warnings  { background: #D1FAE5; color: #059669; }
+.status-tag.success_with_warnings  { background: var(--dm-success-light); color: var(--dm-success); }
 
 /* 终态 — 部分失败（橙色/警告色） */
-.status-tag.partial_failed { background: var(--dm-warning-light); color: #D97706; }
+.status-tag.partial_failed { background: var(--dm-warning-light); color: var(--dm-warning); }
 
 /* 终态 — 失败（红色系） */
 .status-tag.failed { background: var(--dm-danger-light); color: var(--dm-danger); }
 
 /* 中间态 — 删除中（灰色系） */
-.status-tag.deleting { background: #F1F5F9; color: #64748B; }
+.status-tag.deleting { background: var(--dm-border-light); color: var(--dm-text-secondary); }
 
 /* 通用 info（用于非文档状态的场景） */
 .status-tag.info { background: var(--dm-info-light); color: var(--dm-info); }

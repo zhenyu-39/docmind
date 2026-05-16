@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |:---|:---|
-| 文档版本 | v0.3 |
-| 最后更新 | 2026-05-14 |
+| 文档版本 | v0.4 |
+| 最后更新 | 2026-05-15 |
 | 作者 | yuz |
 | 状态 | 进行中 |
 
@@ -38,20 +38,20 @@ Week 1            Week 2           Week 2-3         Week 3         Week 3-4
 | ✅ | 前端登录页 | LoginPage.vue + 路由骨架 |
 | ✅ | 前端布局框架 | AppLayout + Sidebar 空壳 |
 
-### 2.1 Phase 1 测试（待补）
+### 2.1 Phase 1 测试
 
-> Phase 1 开发时未同步编写测试，以下测试需在 Phase 2 开始前补齐。
+> Phase 1 测试已完成，全部通过。
 
 | 状态 | 任务 | 测试类型 | 说明 |
 |:---|:---|:---|:---|
-| ⬜ | 密码哈希 & JWT 单元测试 | 单元测试 | `hash_password` / `verify_password` / `create_access_token` / `decode_access_token` |
-| ⬜ | 认证 Service 单元测试 | 单元测试 | `register`（用户名重复/正常注册）/ `login`（密码错误/正常登录） |
-| ⬜ | 认证 API 接口测试 | 接口测试 | POST `/api/auth/register` + `/api/auth/login` 请求/响应格式 + 错误码 |
-| ⬜ | Pydantic Schema 校验测试 | 单元测试 | `RegisterRequest` / `LoginRequest` 字段校验（用户名长度/密码长度） |
-| ⬜ | 用户模型测试 | 单元测试 | `User` ORM 字段默认值、`relationship` 关联 |
-| ⬜ | 前端 LoginPage 组件测试 | 组件测试 | 表单渲染、提交按钮、错误提示 |
-| ⬜ | 前端 AppLayout 组件测试 | 组件测试 | 布局渲染、Sidebar 存在性 |
-| ⬜ | 前端路由守卫测试 | 组件测试 | 未登录重定向到 `/login` |
+| ✅ | 密码哈希 & JWT 单元测试 | 单元测试 | `hash_password` / `verify_password` / `create_access_token` / `decode_access_token` |
+| ✅ | 认证 Service 单元测试 | 单元测试 | `register`（用户名重复/正常注册）/ `login`（密码错误/正常登录） |
+| ✅ | 认证 API 接口测试 | 接口测试 | POST `/api/auth/register` + `/api/auth/login` 请求/响应格式 + 错误码 |
+| ✅ | Pydantic Schema 校验测试 | 单元测试 | `RegisterRequest` / `LoginRequest` 字段校验（用户名长度/密码长度） |
+| ✅ | 用户模型测试 | 单元测试 | `User` ORM 字段默认值、`relationship` 关联 |
+| ✅ | 前端 LoginPage 组件测试 | 组件测试 | 表单渲染、提交按钮、错误提示 |
+| ✅ | 前端 AppLayout 组件测试 | 组件测试 | 布局渲染、Sidebar 存在性 |
+| ✅ | 前端路由守卫测试 | 组件测试 | 未登录重定向到 `/login` |
 
 ---
 

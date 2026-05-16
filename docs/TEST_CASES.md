@@ -2,10 +2,10 @@
 
 | 属性 | 值 |
 |:---|:---|
-| 文档版本 | v0.1 |
-| 最后更新 | 2026-05-15 |
+| 文档版本 | v0.2 |
+| 最后更新 | 2026-05-16 |
 | 作者 | yuz |
-| 状态 | 进行中（Phase 1 测试完成） |
+| 状态 | 进行中（Phase 1 测试完成，LoginRequest 校验修复） |
 
 ---
 
@@ -58,7 +58,7 @@
 | U3.2 | 注册-用户名过短 | `RegisterRequest` | username="a", password="123456" | `ValidationError`（Pydantic V2: `string_too_short`） | ✅ | 2026-05-15 | V2 错误类型适配 |
 | U3.3 | 注册-密码过短 | `RegisterRequest` | username="test", password="123" | `ValidationError`（Pydantic V2: `string_too_short`） | ✅ | 2026-05-15 | V2 错误类型适配 |
 | U3.4 | 注册-用户名超长 | `RegisterRequest` | username="x"×65, password="123456" | `ValidationError`（Pydantic V2: `string_too_long`） | ✅ | 2026-05-15 | V2 错误类型适配 |
-| U3.5 | 登录-空用户名通过校验 | `LoginRequest` | username="", password="123456" | 校验通过（无 min_length 约束） | ✅ | 2026-05-15 | 非 bug，当前实现如此 |
+| U3.5 | 登录-空用户名校验失败 | `LoginRequest` | username="", password="123456" | `ValidationError`（Pydantic V2: `string_too_short`） | ✅ | 2026-05-16 | LoginRequest 已加 min_length=2 |
 | U3.6 | TokenResponse 序列化 | `TokenResponse` | access_token="abc", expires_in=86400 | model_dump() 含 token_type="bearer" | ✅ | 2026-05-15 | — |
 | U3.7 | 注册-缺少用户名 | `RegisterRequest` | password="123456" | `ValidationError` | ✅ | 2026-05-15 | — |
 | U3.8 | 注册-缺少密码 | `RegisterRequest` | username="test" | `ValidationError` | ✅ | 2026-05-15 | — |
@@ -87,7 +87,7 @@
 | A1.6 | 注册-缺少密码 | POST `/api/auth/register` | `{"username":"test"}` | 422 | ✅ | 2026-05-15 | — |
 | A1.7 | 登录-成功 | POST `/api/auth/login` | 正确凭证 | 200, `{code:0, message:"登录成功", data:{access_token, token_type, expires_in}}` | ✅ | 2026-05-15 | — |
 | A1.8 | 登录-密码错误 | POST `/api/auth/login` | 错误密码 | 401, `{code:"E5002", message:"用户名或密码错误"}` | ✅ | 2026-05-15 | — |
-| A1.9 | 登录-空用户名 | POST `/api/auth/login` | `{"username":"","password":"correct"}` | 200（无 min_length，通过校验→mock 返回成功） | ✅ | 2026-05-15 | — |
+| A1.9 | 登录-空用户名 | POST `/api/auth/login` | `{"username":"","password":"correct"}` | 422, `{code:"E9003"}` | ✅ | 2026-05-16 | LoginRequest 已加 min_length=2 |
 | A1.10 | 登录-缺少密码 | POST `/api/auth/login` | `{"username":"test"}` | 422 | ✅ | 2026-05-15 | — |
 | A1.11 | 受保护路由-无 Token | GET `/api/knowledge-bases` | 无 Authorization header | 401, `{code:"E5004"}` | ✅ | 2026-05-15 | — |
 | A1.12 | 受保护路由-无效 Token | GET `/api/knowledge-bases` | `Bearer invalid_token` | 401, `{code:"E5004"}` | ✅ | 2026-05-15 | — |
@@ -135,16 +135,16 @@
 
 | ID | 测试用例 | 端点 | 场景 | 预期响应 | 状态 | 最后运行 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
-| A3.1 | 上传文档 | POST `/api/documents` | 正常 PDF | 202 | ⬜ | — | multipart |
-| A3.2 | 上传-重复文件名 | POST | 同名文件 | 409, E2013 | ⬜ | — | — |
-| A3.3 | 上传-force 覆盖 | POST | force=true | 202，旧文档被替换 | ⬜ | — | — |
-| A3.4 | 上传-不支持格式 | POST | .exe 文件 | 415, E2002 | ⬜ | — | — |
-| A3.5 | 上传-超大文件 | POST | >50MB | 400, E2003 | ⬜ | — | — |
-| A3.6 | 文档列表 | GET | 正常 | 200, 分页列表 | ⬜ | — | — |
-| A3.7 | 文档列表-状态筛选 | GET `?status=ready` | 筛选 | 200, 仅返回 ready 状态 | ⬜ | — | — |
-| A3.8 | 文档详情 | GET `/{id}` | 正常 | 200, 含 chunk_count | ⬜ | — | — |
-| A3.9 | 文档删除 | DELETE `/{id}` | 正常 | 200, 异步删除 | ⬜ | — | — |
-| A3.10 | 重新处理 | POST `/{id}/reprocess` | 失败文档 | 202 | ⬜ | — | — |
+| A3.1 | 上传文档 | POST `/api/knowledge-bases/{kb_id}/documents` | 正常 PDF | 201 | ⬜ | — | multipart |
+| A3.2 | 上传-重复文件名 | POST `/api/knowledge-bases/{kb_id}/documents` | 同名文件 | 409, E2013 | ⬜ | — | — |
+| A3.3 | 上传-force 覆盖 | POST `/api/knowledge-bases/{kb_id}/documents` | force=true | 201，旧文档被替换 | ⬜ | — | — |
+| A3.4 | 上传-不支持格式 | POST `/api/knowledge-bases/{kb_id}/documents` | .exe 文件 | 415, E2002 | ⬜ | — | — |
+| A3.5 | 上传-超大文件 | POST `/api/knowledge-bases/{kb_id}/documents` | >50MB | 400, E2003 | ⬜ | — | — |
+| A3.6 | 文档列表 | GET `/api/knowledge-bases/{kb_id}/documents` | 正常 | 200, 分页列表 | ⬜ | — | — |
+| A3.7 | 文档列表-状态筛选 | GET `/api/knowledge-bases/{kb_id}/documents?status=ready` | 筛选 | 200, 仅返回 ready 状态 | ⬜ | — | — |
+| A3.8 | 文档详情 | GET `/api/knowledge-bases/{kb_id}/documents/{id}` | 正常 | 200, 含 chunk_count | ⬜ | — | — |
+| A3.9 | 文档删除 | DELETE `/api/knowledge-bases/{kb_id}/documents/{id}` | 正常 | 200, 异步删除 | ⬜ | — | — |
+| A3.10 | 重新处理 | POST `/api/knowledge-bases/{kb_id}/documents/{id}/reprocess` | 失败文档 | 202 | ⬜ | — | — |
 
 ### 3.3 后端 — Celery 流水线单元测试
 
