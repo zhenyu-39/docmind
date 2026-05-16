@@ -63,7 +63,7 @@ Week 1            Week 2           Week 2-3         Week 3         Week 3-4
 
 | 状态 | 任务 | 说明 | 依赖决策 |
 |:---|:---|:---|:---|
-| ⬜ | 知识库 CRUD 接口 | POST/GET/PUT/DELETE `/api/knowledge-bases`，DELETE 异步（标记 deleting → Celery → 物理删除，FK CASCADE 级联子记录） | KB 级异步批量清理 |
+| ⬜ | 知识库 CRUD 接口 | POST/GET/PUT/DELETE `/api/knowledge-bases`，名称用户级唯一 `(user_id, name)`，DELETE 当前阶段仅标记 `status=deleting` + 返回 202（Celery 异步物理删除后续实现） | KB 级异步批量清理 |
 | ⬜ | 文档状态枚举 | `DocumentStatus(str, Enum)` — 10 状态 + `TERMINAL_STATUSES` + `is_terminal()`，ORM/Schema/API 统一使用 | 约束一 |
 | ⬜ | 文档上传 API | POST `/documents`（multipart + force 参数），唯一性检查 `(kb_id, filename)` | 约束二、约束四 |
 | ⬜ | 批量上传 API | POST `/documents/batch-upload`（多文件，部分成功返回） | 决策 #13 |

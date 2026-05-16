@@ -69,14 +69,15 @@ CREATE TABLE knowledge_bases (
     doc_count INT DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+    UNIQUE INDEX idx_user_name (user_id, name)
 );
 ```
 
 | 字段 | 类型 | 说明 |
 |:---|:---|:---|
 | id | BIGINT | 主键 |
-| name | VARCHAR(128) | 知识库名称 |
+| name | VARCHAR(128) | 知识库名称，与 user_id 联合唯一（同一用户下名称不重复） |
 | description | TEXT | 知识库描述 |
 | user_id | BIGINT | 创建者用户 ID |
 | status | ENUM | active（正常）/ deleting（异步清理中，随后物理删除行） |
@@ -256,6 +257,7 @@ CREATE TABLE messages (
 | 表 | 索引 | 类型 | 用途 |
 |:---|:---|:---|:---|
 | users | username (UNIQUE) | 唯一索引 | 登录查询 |
+| knowledge_bases | idx_user_name (user_id, name) | 唯一索引 | 用户级知识库名称唯一性约束 |
 | documents | idx_kb_id | 普通索引 | 按知识库列出文档 |
 | documents | idx_kb_filename (kb_id, filename) | 复合索引 | 文档唯一性检查 + 同名查找 |
 | chunks | idx_doc_id | 普通索引 | 按文档列出分块 |
