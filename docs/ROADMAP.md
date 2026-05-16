@@ -38,6 +38,21 @@ Week 1            Week 2           Week 2-3         Week 3         Week 3-4
 | ✅ | 前端登录页 | LoginPage.vue + 路由骨架 |
 | ✅ | 前端布局框架 | AppLayout + Sidebar 空壳 |
 
+### 2.1 Phase 1 测试（待补）
+
+> Phase 1 开发时未同步编写测试，以下测试需在 Phase 2 开始前补齐。
+
+| 状态 | 任务 | 测试类型 | 说明 |
+|:---|:---|:---|:---|
+| ⬜ | 密码哈希 & JWT 单元测试 | 单元测试 | `hash_password` / `verify_password` / `create_access_token` / `decode_access_token` |
+| ⬜ | 认证 Service 单元测试 | 单元测试 | `register`（用户名重复/正常注册）/ `login`（密码错误/正常登录） |
+| ⬜ | 认证 API 接口测试 | 接口测试 | POST `/api/auth/register` + `/api/auth/login` 请求/响应格式 + 错误码 |
+| ⬜ | Pydantic Schema 校验测试 | 单元测试 | `RegisterRequest` / `LoginRequest` 字段校验（用户名长度/密码长度） |
+| ⬜ | 用户模型测试 | 单元测试 | `User` ORM 字段默认值、`relationship` 关联 |
+| ⬜ | 前端 LoginPage 组件测试 | 组件测试 | 表单渲染、提交按钮、错误提示 |
+| ⬜ | 前端 AppLayout 组件测试 | 组件测试 | 布局渲染、Sidebar 存在性 |
+| ⬜ | 前端路由守卫测试 | 组件测试 | 未登录重定向到 `/login` |
+
 ---
 
 ## 3. Phase 2：文档入库（3-4 天）
@@ -89,6 +104,29 @@ Week 1            Week 2           Week 2-3         Week 3         Week 3-4
 | Resumable 分片上传 | Phase 5+ | 50MB 以内 multipart 足够 |
 | 内容去重 | Phase 5+ | Phase 2 仅做文件名唯一性检查 |
 
+### 3.5 Phase 2 测试
+
+> Phase 2 功能完成后立即执行，不推迟到后续阶段。
+
+| 状态 | 任务 | 测试类型 | 说明 |
+|:---|:---|:---|:---|
+| ⬜ | 知识库 CRUD API 接口测试 | 接口测试 | POST/GET/PUT/DELETE `/api/knowledge-bases` 正常流程 + 错误码（E1001/E1002） |
+| ⬜ | 文档上传 API 接口测试 | 接口测试 | POST `/api/documents` multipart 上传 + force 覆盖 + 唯一性冲突 |
+| ⬜ | 文档删除 API 接口测试 | 接口测试 | DELETE 异步清理流程 + 状态流转 |
+| ⬜ | 文档状态枚举与状态机测试 | 单元测试 | `DocumentStatus` 10 状态 + `TERMINAL_STATUSES` + `is_terminal()` |
+| ⬜ | Celery 入库流水线单元测试 | 单元测试 | 幂等锁 / 解析容错 / 分块逻辑 / batch checkpoint |
+| ⬜ | 文件存储服务测试 | 单元测试 | `storage.py` 本地存储 put/get/delete + 路径生成 |
+| ⬜ | 前端知识库管理页组件测试 | 组件测试 | 网格渲染、新建/编辑弹窗、删除确认 |
+| ⬜ | 前端文档管理页组件测试 | 组件测试 | 表格渲染、筛选、分页、拖拽上传 |
+| ⬜ | 前端文档状态轮询测试 | 组件测试 | 非终态轮询、终态停止、超时处理 |
+
+### 3.6 Phase 2 专项测试
+
+| 状态 | 任务 | 测试类型 | 说明 |
+|:---|:---|:---|:---|
+| ⬜ | 离线检索评估 | 检索评估 | BM25 vs 向量 vs RRF 的 Recall@5/MRR 对比报告（见 TESTING.md §2） |
+| ⬜ | 回归测试集初版建立 | 回归测试 | 25-30 个固定问题 + 期望文档标注（见 TESTING.md §4） |
+
 ---
 
 ## 4. Phase 3：核心问答（3-4 天）
@@ -107,6 +145,20 @@ Week 1            Week 2           Week 2-3         Week 3         Week 3-4
 | ⬜ | 前端问答界面 | ChatPage + MessageList + ChatInput + SSE 解析 |
 | ⬜ | 来源引用展示 | 答案末尾展示引用文档名 |
 
+### 4.1 Phase 3 测试
+
+| 状态 | 任务 | 测试类型 | 说明 |
+|:---|:---|:---|:---|
+| ⬜ | 检索器单元测试 | 单元测试 | 向量检索 / BM25 检索各自返回正确数量 + metadata 过滤 |
+| ⬜ | RRF 融合算法测试 | 单元测试 | k=60 合并两路结果的排序正确性 |
+| ⬜ | 问答 SSE 接口测试 | 接口测试 | POST `/api/chat` SSE 事件序列（meta→message→sources→finish）+ 错误码（E4001/E4005） |
+| ⬜ | Prompt 模板测试 | 单元测试 | 检索结果拼接、token 预算控制 |
+| ⬜ | NoopReranker 测试 | 单元测试 | 截取 top_k 行为正确 |
+| ⬜ | 前端 ChatPage 组件测试 | 组件测试 | 消息发送、SSE 流式渲染、停止按钮 |
+| ⬜ | 前端 SSE 解析工具测试 | 单元测试 | `sse.js` 事件解析（各 event 类型 + 异常格式） |
+| ⬜ | 前端来源引用展示测试 | 组件测试 | MessageItem 中来源文档链接渲染 |
+| ⬜ | 人工答案评分（第 1 轮） | 人工评估 | 10 题 × 4 维度评分表（见 TESTING.md §3） |
+
 ---
 
 ## 5. Phase 4：会话 & 记忆（2-3 天）
@@ -120,6 +172,16 @@ Week 1            Week 2           Week 2-3         Week 3         Week 3-4
 | ⬜ | 滑动窗口记忆 | 保留最近 10 轮，超出 LLM 摘要压缩 |
 | ⬜ | 问题重写 | LLM 结合对话历史补全指代和上下文 |
 | ⬜ | 前端会话列表 | Sidebar 展示会话列表 + 切换 |
+
+### 5.1 Phase 4 测试
+
+| 状态 | 任务 | 测试类型 | 说明 |
+|:---|:---|:---|:---|
+| ⬜ | 会话 CRUD API 接口测试 | 接口测试 | POST/GET/PUT/DELETE 会话正常流程 + 错误码（E3001/E3002） |
+| ⬜ | 滑动窗口记忆测试 | 单元测试 | 保留最近 10 轮、超出 LLM 摘要压缩 |
+| ⬜ | 问题重写测试 | 单元测试 | LLM 结合对话历史补全指代 |
+| ⬜ | 前端会话列表组件测试 | 组件测试 | Sidebar 会话列表渲染、切换、重命名、删除 |
+| ⬜ | 人工答案评分（第 2 轮） | 人工评估 | 对比第 1 轮，验证记忆和重写提升效果 |
 
 ---
 
@@ -138,19 +200,38 @@ Week 1            Week 2           Week 2-3         Week 3         Week 3-4
 | ⬜ | README + 部署文档 | 项目说明 + Docker Compose 部署方案 |
 | ⬜ | 简历描述文案 | 项目亮点提炼，技术选型理由 |
 
+### 6.1 Phase 5 测试
+
+| 状态 | 任务 | 测试类型 | 说明 |
+|:---|:---|:---|:---|
+| ⬜ | 全量回归测试 | 回归测试 | 运行 `regression_test.py` 遍历完整测试集，检查召回/非空/来源/SSE/错误率 |
+| ⬜ | 压测 | 性能测试 | Locust 4 场景（基准/日常/峰值/极限），P50≤3s / P99≤10s |
+| ⬜ | 最终人工评分 | 人工评估 | 最终 10 题 × 4 维度评分，平均综合分 ≥ 4.0 |
+| ⬜ | 限流测试 | 接口测试 | IP/用户级频率限制生效验证 |
+| ⬜ | Refresh Token 测试 | 接口测试 | Token 刷新 / Rotation（旧 token 失效）/ 主动吊销 |
+
 ---
 
 ## 7. 依赖关系
 
 ```
 Phase 1 ──→ Phase 2 ──→ Phase 3 ──→ Phase 4 ──→ Phase 5
-                              └────────────┘
-                              可部分并行
+  │            │            │            │            │
+  └─ 测试 ──→  └─ 测试 ──→  └─ 测试 ──→  └─ 测试 ──→  └─ 测试
+     (待补)      (含离线评估)  (含人工评分1) (含人工评分2)  (全量+压测)
 ```
 
 - Phase 3 和 Phase 4 可部分并行：核心问答的单轮链路可与会话 CRUD 同时开发
 - Phase 4 的问题重写依赖 Phase 3 的 LLM 调用能力
 - Phase 5 在所有功能就绪后进行
+
+### 7.1 测试准入规则
+
+**每个 Phase 的测试必须在该 Phase 功能完成后立即执行，作为下一 Phase 的准入条件：**
+
+- Phase N 功能完成 → 执行 Phase N 测试 → 全部通过 → 方可进入 Phase N+1
+- Phase 1 的测试需在 Phase 2 正式开始前补齐
+- 回归测试集随 Phase 迭代持续扩充，每次提交运行全量回归
 
 ---
 
@@ -160,4 +241,5 @@ Phase 1 ──→ Phase 2 ──→ Phase 3 ──→ Phase 4 ──→ Phase 5
 - [架构设计文档](ARCHITECTURE.md)
 - [开发指南](DEVELOPMENT.md)
 - [测试策略](TESTING.md)
+- [测试用例跟踪](TEST_CASES.md)
 - [UI 设计规范](../frontend/docs/UIDESIGN.md)

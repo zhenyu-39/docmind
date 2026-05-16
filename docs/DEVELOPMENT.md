@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |:---|:---|
-| 文档版本 | v0.2 |
-| 最后更新 | 2026-05-11 |
+| 文档版本 | v0.3 |
+| 最后更新 | 2026-05-15 |
 | 作者 | yuz |
 | 状态 | 草稿 |
 
@@ -115,7 +115,25 @@ docmind/
 │   │       └── auth_middleware.py      # JWT 验证中间件
 │   │
 │   ├── chroma_data/                   # ChromaDB 持久化目录（chroma.sqlite3）
-│   └── knowledge_samples/             # 示例知识库文档
+│   ├── knowledge_samples/             # 示例知识库文档
+│   │
+│   ├── tests/                         # 后端测试（pytest + httpx）
+│   │   ├── __init__.py
+│   │   ├── conftest.py                # pytest fixtures（async client, test DB session）
+│   │   ├── test_security.py           # JWT & 密码哈希单元测试
+│   │   ├── test_auth_service.py       # 认证业务逻辑单元测试
+│   │   ├── test_auth_api.py           # 认证接口集成测试
+│   │   ├── test_schemas.py            # Pydantic Schema 校验测试
+│   │   ├── test_kb_api.py             # 知识库 CRUD 接口测试
+│   │   ├── test_document_api.py       # 文档上传/删除接口测试
+│   │   ├── test_retriever.py          # 检索器单元测试（向量+BM25）
+│   │   ├── test_rrf.py                # RRF 融合算法测试
+│   │   ├── test_chat_api.py           # 问答 SSE 接口测试
+│   │   ├── eval_retrieval.py          # 离线检索评估脚本
+│   │   ├── regression_test.py         # 回归测试脚本
+│   │   └── locustfile.py              # 压测脚本（Locust）
+│   │
+│   └── uploads/                       # 上传文件存储目录
 │
 ├── frontend/
 │   ├── docs/                          # 前端设计文档
@@ -164,9 +182,18 @@ docmind/
 │       ├── router/
 │       │   └── index.js               # Vue Router + 三级路由守卫
 │       │
-│       └── utils/
-│           ├── sse.js                 # SSE 事件解析
-│           └── markdown.js            # Markdown 渲染
+│       ├── utils/
+│       │   ├── sse.js                 # SSE 事件解析
+│       │   └── markdown.js            # Markdown 渲染
+│       │
+│       └── tests/                     # 前端测试（vitest + @vue/test-utils）
+│           ├── setup.js               # 全局 Mock & 配置
+│           ├── LoginPage.test.js      # 登录页组件测试
+│           ├── AppLayout.test.js      # 布局组件测试
+│           ├── ChatPage.test.js       # 问答页组件测试
+│           ├── KnowledgeList.test.js  # 知识库管理页组件测试
+│           ├── DocumentList.test.js   # 文档管理页组件测试
+│           └── sse.test.js            # SSE 解析工具测试
 ```
 
 ---
@@ -301,6 +328,12 @@ celery==5.4.*
 httpx==0.28.*
 sse-starlette==2.1.*
 alembic==1.14.*
+
+# 测试
+pytest==8.*
+pytest-asyncio==0.24.*
+pytest-cov==5.*
+httpx==0.28.*
 ```
 
 > 注：`rank-bm25` 保留用于快速原型验证，正式实现替换为 jieba + 自定义 BM25（见 [ARCHITECTURE.md §7.2](ARCHITECTURE.md#72-bm25-实现方案)）。
@@ -321,7 +354,10 @@ alembic==1.14.*
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "vitest": "^2.1.0",
+    "@vue/test-utils": "^2.4.0",
+    "jsdom": "^25.0.0"
   }
 }
 ```
@@ -344,11 +380,18 @@ alembic revision --autogenerate -m "描述"     # 生成迁移脚本
 # Celery Worker
 celery -A app.ingest.celery_app worker --loglevel=info
 
+# 测试
+pytest tests/ -v                              # 运行全部测试
+pytest tests/ -v --cov=app --cov-report=html  # 含覆盖率报告
+pytest tests/test_auth_api.py -v              # 运行单个测试文件
+
 # === 前端 ===
 cd frontend
 npm run dev        # 开发服务器（localhost:5173）
 npm run build      # 生产构建（输出到 dist/）
 npm run preview    # 预览生产构建
+npm run test       # 运行 vitest 测试
+npm run test:ui    # vitest UI 模式
 ```
 
 ---
