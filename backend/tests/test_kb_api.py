@@ -10,8 +10,8 @@ from app.core.exceptions import (
     PermissionDeniedException,
 )
 from app.schemas.knowledge_base import (
-    KnowledgeBaseDeleteData,
-    KnowledgeBaseListData,
+    KnowledgeBaseDeleteResponse,
+    KnowledgeBaseListResponse,
     KnowledgeBaseResponse,
 )
 
@@ -28,11 +28,11 @@ def _make_kb_response(kb_id=1, name="测试知识库", description=None, user_id
 def _make_list_data(total=1, page=1, page_size=20, items=None):
     if items is None:
         items = [_make_kb_response()]
-    return KnowledgeBaseListData(total=total, page=page, page_size=page_size, items=items)
+    return KnowledgeBaseListResponse(total=total, page=page, page_size=page_size, items=items)
 
 
 def _make_delete_data(kb_id=1, status="deleting"):
-    return KnowledgeBaseDeleteData(kb_id=kb_id, status=status)
+    return KnowledgeBaseDeleteResponse(kb_id=kb_id, status=status)
 
 
 class TestCreateKB:

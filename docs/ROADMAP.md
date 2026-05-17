@@ -64,7 +64,7 @@ Week 1            Week 2           Week 2-3         Week 3         Week 3-4
 | 状态 | 任务 | 说明 | 依赖决策 |
 |:---|:---|:---|:---|
 | ✅ | 知识库 CRUD 接口 | POST/GET/PUT/DELETE `/api/knowledge-bases`，名称用户级唯一 `(user_id, name)`，DELETE 当前阶段仅标记 `status=deleting` + 返回 202（Celery 异步物理删除后续实现） | KB 级异步批量清理 |
-| ⬜ | 文档状态枚举 | `DocumentStatus(str, Enum)` — 10 状态 + `TERMINAL_STATUSES` + `is_terminal()`，ORM/Schema/API 统一使用 | 约束一 |
+| ✅ | 文档状态枚举 | `DocumentStatus(str, Enum)` — 10 状态 + `TERMINAL_STATUSES` + `is_terminal()`，ORM/Schema/API 统一使用 | 约束一 |
 | ⬜ | 文档上传 API | POST `/documents`（multipart + force 参数），唯一性检查 `(kb_id, filename)` | 约束二、约束四 |
 | ⬜ | 批量上传 API | POST `/documents/batch-upload`（多文件，部分成功返回） | 决策 #13 |
 | ⬜ | 重新处理 API | POST `/documents/{id}/reprocess`（仅 `partial_failed`/`failed` 允许） | 决策 #12 |
@@ -113,7 +113,7 @@ Week 1            Week 2           Week 2-3         Week 3         Week 3-4
 | ✅ | 知识库 CRUD API 接口测试 | 接口测试 | POST/GET/PUT/DELETE `/api/knowledge-bases` 正常流程 + 错误码（E1001/E1002/E5005）+ 未认证 401 + 参数校验 422（28 个用例）|
 | ⬜ | 文档上传 API 接口测试 | 接口测试 | POST `/api/documents` multipart 上传 + force 覆盖 + 唯一性冲突 |
 | ⬜ | 文档删除 API 接口测试 | 接口测试 | DELETE 异步清理流程 + 状态流转 |
-| ⬜ | 文档状态枚举与状态机测试 | 单元测试 | `DocumentStatus` 10 状态 + `TERMINAL_STATUSES` + `is_terminal()` |
+| ✅ | 文档状态枚举与状态机测试 | 单元测试 | `DocumentStatus` 10 状态 + `TERMINAL_STATUSES` + `is_terminal()` |
 | ⬜ | Celery 入库流水线单元测试 | 单元测试 | 幂等锁 / 解析容错 / 分块逻辑 / batch checkpoint |
 | ⬜ | 文件存储服务测试 | 单元测试 | `storage.py` 本地存储 put/get/delete + 路径生成 |
 | ⬜ | 前端知识库管理页组件测试 | 组件测试 | 网格渲染、新建/编辑弹窗、删除确认 |

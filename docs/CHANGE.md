@@ -1,5 +1,23 @@
 # DocMind 变更日志
 
+## 2026-05-17 — Phase 2 文档状态枚举
+
+### 新增
+- `schemas/document.py` — 文档 Pydantic Schema（`DocumentResponse`、`DocumentUploadResponse`、`DocumentListResponse`、`DocumentDeleteResponse`、`DocumentReprocessResponse`、`DocumentBatchUploadResponse`、`DocumentChunkResponse`、`DocumentChunkListResponse`），status 字段统一使用 `DocumentStatus` 枚举
+- `tests/test_schemas.py` — 新增 `DocumentStatus` 枚举（10 状态 + `TERMINAL_STATUSES` + `is_terminal()`）和 `DocumentResponse` Schema 校验测试（18 个用例）
+
+### 修改
+- `schemas/knowledge_base.py` — `KnowledgeBaseListData` → `KnowledgeBaseListResponse`，`KnowledgeBaseDeleteData` → `KnowledgeBaseDeleteResponse`，统一命名风格
+- `schemas/__init__.py` — 导出全部文档 Schema
+- `tests/test_knowledge_base.py` → `tests/test_kb_api.py` — 重命名对齐 DEVELOPMENT.md
+- ROADMAP.md — 标记「文档状态枚举」+ 对应测试任务完成
+- TEST_CASES.md — 新增文档状态枚举测试用例（U5.1-U5.12），Phase 2-3 用例 ID 全部顺延
+
+### 测试结果
+- 后端：92/92 全部通过（新增 18 个 Schema 测试，无回归）
+
+---
+
 ## 2026-05-17 — Phase 2 KB CRUD 代码审查 + 修复
 
 ### 审查结论

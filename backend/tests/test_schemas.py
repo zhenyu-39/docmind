@@ -68,3 +68,94 @@ class TestTokenResponse:
     def test_custom_token_type(self):
         resp = TokenResponse(access_token="abc", token_type="jwt", expires_in=60)
         assert resp.token_type == "jwt"
+
+
+class TestDocumentStatusEnum:
+    """DocumentStatus 枚举与状态机单元测试"""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        from app.models.enums import DocumentStatus, TERMINAL_STATUSES, is_terminal
+        self.DocumentStatus = DocumentStatus
+        self.TERMINAL_STATUSES = TERMINAL_STATUSES
+        self.is_terminal = is_terminal
+
+    def test_ten_statuses(self):
+        assert len(list(self.DocumentStatus)) == 10
+
+    def test_str_subclass(self):
+        assert issubclass(self.DocumentStatus, str)
+        assert self.DocumentStatus.COMPLETED == "completed"
+        assert self.DocumentStatus.UPLOADED == "uploaded"
+
+    def test_all_values_match_doc(self):
+        expected = {
+            "uploaded", "parsing", "chunking", "embedding", "vector_storing",
+            "completed", "success_with_warnings", "partial_failed", "failed", "deleting",
+        }
+        actual = {m.value for m in self.DocumentStatus}
+        assert actual == expected
+
+    def test_terminal_statuses_count(self):
+        assert len(self.TERMINAL_STATUSES) == 4
+        assert "completed" in self.TERMINAL_STATUSES
+        assert "success_with_warnings" in self.TERMINAL_STATUSES
+        assert "partial_failed" in self.TERMINAL_STATUSES
+        assert "failed" in self.TERMINAL_STATUSES
+
+    def test_terminal_statuses_is_frozenset(self):
+        assert isinstance(self.TERMINAL_STATUSES, frozenset)
+
+    @pytest.mark.parametrize("status", ["completed", "success_with_warnings", "partial_failed", "failed"])
+    def test_is_terminal_true(self, status):
+        assert self.is_terminal(status) is True
+
+    @pytest.mark.parametrize("status", ["uploaded", "parsing", "chunking", "embedding", "vector_storing", "deleting"])
+    def test_is_terminal_false(self, status):
+        assert self.is_terminal(status) is False
+
+    def test_is_terminal_accepts_plain_string(self):
+        assert self.is_terminal("completed") is True
+        assert self.is_terminal("uploaded") is False
+        assert self.is_terminal("nonexistent") is False
+
+
+class TestDocumentResponse:
+    """DocumentResponse Pydantic Schema 校验"""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        from app.schemas.document import DocumentResponse
+        self.DocumentResponse = DocumentResponse
+
+    def test_accepts_enum_value(self):
+        from app.models.enums import DocumentStatus
+        resp = self.DocumentResponse(
+            id=1, kb_id=1, filename="test.pdf", file_type="pdf",
+            status=DocumentStatus.UPLOADED, created_at="2026-05-17T00:00:00",
+        )
+        assert resp.status == DocumentStatus.UPLOADED
+
+    def test_accepts_string_and_converts(self):
+        resp = self.DocumentResponse(
+            id=1, kb_id=1, filename="test.pdf", file_type="pdf",
+            status="completed", created_at="2026-05-17T00:00:00",
+        )
+        from app.models.enums import DocumentStatus
+        assert resp.status == DocumentStatus.COMPLETED
+
+    def test_rejects_invalid_status(self):
+        with pytest.raises(ValidationError):
+            self.DocumentResponse(
+                id=1, kb_id=1, filename="test.pdf", file_type="pdf",
+                status="invalid_status", created_at="2026-05-17T00:00:00",
+            )
+
+    def test_model_dump_returns_string(self):
+        resp = self.DocumentResponse(
+            id=1, kb_id=1, filename="test.pdf", file_type="pdf",
+            status="completed", created_at="2026-05-17T00:00:00",
+        )
+        data = resp.model_dump()
+        assert data["status"] == "completed"
+        assert isinstance(data["status"], str)

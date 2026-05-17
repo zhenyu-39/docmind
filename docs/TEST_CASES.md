@@ -5,7 +5,7 @@
 | 文档版本 | v0.3 |
 | 最后更新 | 2026-05-17 |
 | 作者 | yuz |
-| 状态 | 进行中（Phase 2 KB CRUD 代码完成，自动化测试待编写） |
+| 状态 | 进行中（Phase 2 文档状态枚举完成，KB CRUD 已完成） |
 
 ---
 
@@ -131,7 +131,24 @@
 | A2.7 | 删除知识库 | DELETE `/{id}` | 正常 | 202，异步删除 | ✅ | 2026-05-17 | — |
 | A2.8 | 越权访问 | GET | 他人 KB | 403, E5005 | ✅ | 2026-05-17 | — |
 
-### 3.2 后端 — 文档 API 接口测试
+### 3.2 后端 — 文档状态枚举单元测试
+
+| ID | 测试用例 | 被测函数/类 | 场景 | 预期行为 | 状态 | 最后运行 | 备注 |
+|:---|:---|:---|:---|:---|:---|:---|:---|
+| U5.1 | 10 状态值 | `DocumentStatus` | 枚举成员数 | 共 10 个成员 | ✅ | 2026-05-17 | — |
+| U5.2 | str 子类 | `DocumentStatus` | 类型检查 | `issubclass(DocumentStatus, str)` 为 True | ✅ | 2026-05-17 | — |
+| U5.3 | 所有值对齐文档 | `DocumentStatus` | 遍历 value | 10 个字符串值正确 | ✅ | 2026-05-17 | — |
+| U5.4 | 终态集合大小 | `TERMINAL_STATUSES` | 检查元素数 | 4 个终态 | ✅ | 2026-05-17 | — |
+| U5.5 | 终态集合类型 | `TERMINAL_STATUSES` | 类型检查 | 为 `frozenset` 不可变 | ✅ | 2026-05-17 | — |
+| U5.6 | 终态返回 True | `is_terminal()` | 4 个终态参数化 | 全部返回 True | ✅ | 2026-05-17 | — |
+| U5.7 | 非终态返回 False | `is_terminal()` | 6 个非终态参数化 | 全部返回 False | ✅ | 2026-05-17 | — |
+| U5.8 | 接受纯字符串 | `is_terminal()` | `"completed"`, `"uploaded"`, `"nonexistent"` | True/False/False | ✅ | 2026-05-17 | — |
+| U5.9 | Schema 接受枚举值 | `DocumentResponse` | status=DocumentStatus.UPLOADED | 校验通过 | ✅ | 2026-05-17 | — |
+| U5.10 | Schema 接受字符串 | `DocumentResponse` | status="completed" | 自动转为枚举 | ✅ | 2026-05-17 | — |
+| U5.11 | Schema 拒绝无效值 | `DocumentResponse` | status="invalid_status" | ValidationError | ✅ | 2026-05-17 | — |
+| U5.12 | Schema 序列化 | `DocumentResponse` | model_dump() | status 为字符串 "completed" | ✅ | 2026-05-17 | — |
+
+### 3.3 后端 — 文档 API 接口测试
 
 | ID | 测试用例 | 端点 | 场景 | 预期响应 | 状态 | 最后运行 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
@@ -146,19 +163,19 @@
 | A3.9 | 文档删除 | DELETE `/api/knowledge-bases/{kb_id}/documents/{id}` | 正常 | 200, 异步删除 | ⬜ | — | — |
 | A3.10 | 重新处理 | POST `/api/knowledge-bases/{kb_id}/documents/{id}/reprocess` | 失败文档 | 202 | ⬜ | — | — |
 
-### 3.3 后端 — Celery 流水线单元测试
+### 3.4 后端 — Celery 流水线单元测试
 
 | ID | 测试用例 | 被测模块 | 场景 | 预期行为 | 状态 | 最后运行 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
-| U5.1 | 幂等锁-正常获取 | `tasks.py` | 首次入队 | Redis SET NX 成功 | ⬜ | — | Mock Redis |
-| U5.2 | 幂等锁-重复拒绝 | `tasks.py` | 重复入队 | 返回「处理中」不重复执行 | ⬜ | — | — |
-| U5.3 | 解析容错-轻微错误 | `parser.py` | <20% 页面失败 | 返回 warning 级别结果 | ⬜ | — | — |
-| U5.4 | 解析容错-中等错误 | `parser.py` | 20-50% 页面失败 | 标记 partial_failed | ⬜ | — | — |
-| U5.5 | 解析容错-严重错误 | `parser.py` | >50% 页面失败 | 标记 failed | ⬜ | — | — |
-| U5.6 | 分块逻辑 | `chunker.py` | 长文本 | 按分隔符优先级分块，每块 800-1200 chars | ⬜ | — | — |
-| U5.7 | Embedding 批次 checkpoint | `tasks.py` | 中途失败 | 从 last_success_batch 恢复 | ⬜ | — | — |
+| U6.1 | 幂等锁-正常获取 | `tasks.py` | 首次入队 | Redis SET NX 成功 | ⬜ | — | Mock Redis |
+| U6.2 | 幂等锁-重复拒绝 | `tasks.py` | 重复入队 | 返回「处理中」不重复执行 | ⬜ | — | — |
+| U6.3 | 解析容错-轻微错误 | `parser.py` | <20% 页面失败 | 返回 warning 级别结果 | ⬜ | — | — |
+| U6.4 | 解析容错-中等错误 | `parser.py` | 20-50% 页面失败 | 标记 partial_failed | ⬜ | — | — |
+| U6.5 | 解析容错-严重错误 | `parser.py` | >50% 页面失败 | 标记 failed | ⬜ | — | — |
+| U6.6 | 分块逻辑 | `chunker.py` | 长文本 | 按分隔符优先级分块，每块 800-1200 chars | ⬜ | — | — |
+| U6.7 | Embedding 批次 checkpoint | `tasks.py` | 中途失败 | 从 last_success_batch 恢复 | ⬜ | — | — |
 
-### 3.4 前端 — 组件测试
+### 3.5 前端 — 组件测试
 
 | ID | 测试用例 | 组件 | 验证项 | 预期行为 | 状态 | 最后运行 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
@@ -180,12 +197,12 @@
 
 | ID | 测试用例 | 被测模块 | 场景 | 预期行为 | 状态 | 最后运行 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
-| U6.1 | 向量检索-基本 | `retriever.py` | 查询 | 返回 top_k 结果，含 doc_id + score | ⬜ | — | — |
-| U6.2 | 向量检索-kb_id 过滤 | `retriever.py` | 指定 kb_id | 仅返回该 kb_id 的结果 | ⬜ | — | — |
-| U6.3 | BM25 检索-基本 | `retriever.py` | 中文查询 | 返回 BM25 排序结果 | ⬜ | — | — |
-| U6.4 | RRF 融合-排序正确 | `retriever.py` | 两路结果 | k=60 公式正确排序 | ⬜ | — | — |
-| U6.5 | RRF 融合-单路为空 | `retriever.py` | BM25 无结果 | 仅返回向量结果 | ⬜ | — | — |
-| U6.6 | NoopReranker | `reranker.py` | 任意输入 | 截取 top_k 不改变顺序 | ⬜ | — | — |
+| U7.1 | 向量检索-基本 | `retriever.py` | 查询 | 返回 top_k 结果，含 doc_id + score | ⬜ | — | — |
+| U7.2 | 向量检索-kb_id 过滤 | `retriever.py` | 指定 kb_id | 仅返回该 kb_id 的结果 | ⬜ | — | — |
+| U7.3 | BM25 检索-基本 | `retriever.py` | 中文查询 | 返回 BM25 排序结果 | ⬜ | — | — |
+| U7.4 | RRF 融合-排序正确 | `retriever.py` | 两路结果 | k=60 公式正确排序 | ⬜ | — | — |
+| U7.5 | RRF 融合-单路为空 | `retriever.py` | BM25 无结果 | 仅返回向量结果 | ⬜ | — | — |
+| U7.6 | NoopReranker | `reranker.py` | 任意输入 | 截取 top_k 不改变顺序 | ⬜ | — | — |
 
 ### 4.2 问答 SSE 接口测试
 
@@ -222,9 +239,9 @@
 | A5.1 | 会话 CRUD 全套 | API | 创建/列表/详情/重命名/删除 | 各端点正常响应 | ⬜ | — | — |
 | A5.2 | 越权访问会话 | API | 访问他人会话 | 403, E3002 | ⬜ | — | — |
 | A5.3 | 多轮对话上下文 | Service | 连续 3 轮问答 | 历史消息注入 context | ⬜ | — | — |
-| U7.1 | 滑动窗口-10 轮内 | `chat_service` | 8 轮对话 | 历史完整保留 | ⬜ | — | — |
-| U7.2 | 滑动窗口-超出 10 轮 | `chat_service` | 12 轮对话 | 前 2 轮被摘要压缩 | ⬜ | — | — |
-| U7.3 | 问题重写-指代补全 | `intent.py` | "它多少钱？" | 补全为 "XX 产品多少钱？" | ⬜ | — | — |
+| U8.1 | 滑动窗口-10 轮内 | `chat_service` | 8 轮对话 | 历史完整保留 | ⬜ | — | — |
+| U8.2 | 滑动窗口-超出 10 轮 | `chat_service` | 12 轮对话 | 前 2 轮被摘要压缩 | ⬜ | — | — |
+| U8.3 | 问题重写-指代补全 | `intent.py` | "它多少钱？" | 补全为 "XX 产品多少钱？" | ⬜ | — | — |
 | C4.1 | Sidebar 会话列表 | `Sidebar` | 多会话 | 列表渲染 + 当前高亮 | ⬜ | — | — |
 | C4.2 | 会话切换 | `Sidebar` | 点击不同会话 | 消息列表切换 | ⬜ | — | — |
 

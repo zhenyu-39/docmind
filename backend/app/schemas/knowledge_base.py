@@ -32,7 +32,7 @@ class KnowledgeBaseResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class KnowledgeBaseListData(BaseModel):
+class KnowledgeBaseListResponse(BaseModel):
     """知识库列表分页数据"""
     total: int
     page: int
@@ -40,7 +40,7 @@ class KnowledgeBaseListData(BaseModel):
     items: list[KnowledgeBaseResponse]
 
 
-class KnowledgeBaseDeleteData(BaseModel):
+class KnowledgeBaseDeleteResponse(BaseModel):
     """知识库删除响应数据"""
     kb_id: int
     status: str

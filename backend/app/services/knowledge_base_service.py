@@ -12,8 +12,8 @@ from app.core.exceptions import (
 from app.models.knowledge_base import KnowledgeBase
 from app.schemas.knowledge_base import (
     KnowledgeBaseCreate,
-    KnowledgeBaseDeleteData,
-    KnowledgeBaseListData,
+    KnowledgeBaseDeleteResponse,
+    KnowledgeBaseListResponse,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdate,
 )
@@ -48,7 +48,7 @@ async def get_kb(db: AsyncSession, kb_id: int) -> KnowledgeBase:
 
 async def list_kbs(
     db: AsyncSession, user_id: int, page: int = 1, page_size: int = 20
-) -> KnowledgeBaseListData:
+) -> KnowledgeBaseListResponse:
     """获取用户的知识库列表（分页）"""
     # 总数
     count_q = select(func.count()).select_from(KnowledgeBase).where(KnowledgeBase.user_id == user_id)
@@ -65,7 +65,7 @@ async def list_kbs(
     rows = (await db.execute(q)).scalars().all()
     items = [KnowledgeBaseResponse.model_validate(r) for r in rows]
 
-    return KnowledgeBaseListData(total=total, page=page, page_size=page_size, items=items)
+    return KnowledgeBaseListResponse(total=total, page=page, page_size=page_size, items=items)
 
 
 async def update_kb(
@@ -93,7 +93,7 @@ async def update_kb(
 
 async def delete_kb(
     db: AsyncSession, kb_id: int, user_id: int, role: str
-) -> KnowledgeBaseDeleteData:
+) -> KnowledgeBaseDeleteResponse:
     """删除知识库（仅标记 status=deleting，不做物理删除）"""
     kb = await get_kb(db, kb_id)
 
@@ -103,7 +103,7 @@ async def delete_kb(
     kb.status = "deleting"
     await db.flush()
     await db.refresh(kb)
-    return KnowledgeBaseDeleteData(kb_id=kb.id, status=kb.status)
+    return KnowledgeBaseDeleteResponse(kb_id=kb.id, status=kb.status)
 
 
 async def check_kb_active(db: AsyncSession, kb_id: int) -> KnowledgeBase:
