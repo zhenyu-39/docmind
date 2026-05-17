@@ -1,5 +1,26 @@
 # DocMind 变更日志
 
+## 2026-05-17 — Phase 2 KB CRUD 代码审查 + 修复
+
+### 审查结论
+- **审查范围**：`api/knowledge_base.py`, `models/knowledge_base.py`, `schemas/knowledge_base.py`, `services/knowledge_base_service.py`, 迁移脚本
+- **原始问题**：2 项严重 + 3 项规范，18 项合规检查全部通过
+- **已修复**：见下方「修复」节
+
+### 修复
+- `api/knowledge_base.py:50` 内联 `from app.schemas...` 移至模块顶部
+- `API.md` §3 GET list 响应 items 示例补上 `user_id` 字段
+- 编写 `tests/test_knowledge_base.py`（28 个用例）覆盖 KB CRUD 全部端点 + 错误码（E1001/E1002/E5005）+ 未认证 401 + 参数校验 422
+
+### 新增 fixture
+- `conftest.py`: `auth_headers` / `admin_auth_headers` / `other_user_auth_headers` 三个 fixture
+
+### 测试结果
+- 后端：72/72 全部通过（新增 28 个 KB CRUD 测试，无回归）
+- 覆盖率：测试覆盖了所有 5 个 KB 端点（POST/GET/PUT/DELETE）的 7 类场景
+
+---
+
 ## 2026-05-16 — Phase 2 知识库 CRUD 实现
 
 ### 新增

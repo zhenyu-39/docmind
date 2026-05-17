@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db
-from app.schemas.knowledge_base import KnowledgeBaseCreate, KnowledgeBaseUpdate
+from app.schemas.knowledge_base import KnowledgeBaseCreate, KnowledgeBaseResponse, KnowledgeBaseUpdate
 from app.services.knowledge_base_service import (
     create_kb,
     delete_kb,
@@ -47,7 +47,6 @@ async def get_knowledge_base(
 ):
     """获取知识库详情"""
     kb = await get_kb(db, kb_id)
-    from app.schemas.knowledge_base import KnowledgeBaseResponse
     return {"code": "0", "message": "ok", "data": KnowledgeBaseResponse.model_validate(kb).model_dump()}
 
 

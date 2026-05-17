@@ -239,6 +239,7 @@
         "id": 1,
         "name": "公司内部知识库",
         "description": "...",
+        "user_id": 1,
         "status": "active",
         "doc_count": 5,
         "chunk_count": 128,

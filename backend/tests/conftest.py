@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.main import app
 from app.dependencies import get_db
+from app.core.security import create_access_token
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -30,3 +31,24 @@ async def async_client(mock_db):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def auth_headers():
+    """生成有效 JWT 认证 header（普通用户 testuser）"""
+    token = create_access_token(1, "testuser", "user")
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def admin_auth_headers():
+    """生成有效 JWT 认证 header（管理员 admin）"""
+    token = create_access_token(2, "admin", "admin")
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def other_user_auth_headers():
+    """生成其他用户的 JWT 认证 header"""
+    token = create_access_token(3, "otheruser", "user")
+    return {"Authorization": f"Bearer {token}"}
