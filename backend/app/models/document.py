@@ -28,7 +28,8 @@ class Document(Base):
     )
     file_size: Mapped[int | None] = mapped_column(BigInteger, comment="bytes")
     status: Mapped[DocumentStatus] = mapped_column(
-        Enum(DocumentStatus, name="document_status"),
+        Enum(DocumentStatus, name="document_status",
+             values_callable=lambda obj: [e.value for e in obj]),
         default=DocumentStatus.UPLOADED,
         server_default=text("'uploaded'"),
     )
