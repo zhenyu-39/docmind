@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |:---|:---|
-| 文档版本 | v0.8 |
-| 最后更新 | 2026-05-20 |
+| 文档版本 | v0.10 |
+| 最后更新 | 2026-05-21 |
 | 作者 | yuz |
 | 状态 | 草稿 |
 
@@ -222,13 +222,18 @@ MySQL chunk_count 事务更新 + kb.chunk_count 同步更新
 
 ### 4.2 分块策略
 
-- **算法**：`RecursiveCharacterTextSplitter`，优先级分隔符：
+- **算法**：`RecursiveCharacterTextSplitter`
+- **分隔符优先级**（从宽到窄逐级切分）：
   ```python
-  ["\n\n", "\n", "。！？", ".!?", " ", ""]
+  separators = ["\n\n", "\n", "。", "！", "？", ".", "!", "?", " ", ""]
+  #            段落      换行   中文句号 感叹号  问号  英文句号 感叹号 问号  空格  字符级
   ```
-- **单位**：`max_chars = 800~1200`（字符估算，不用精确 token）
-- **重叠**：50 tokens ≈ 100~150 字符（按 1 token ≈ 1.5-2 中文字符）
-- **Token 估算**：使用字符数估算（不引入 tiktoken）；Embedding 完成后 DashScope API 返回的 `usage.total_tokens` 回写 `chunk.token_count`
+  > `RecursiveCharacterTextSplitter` 的 `separators` 参数是**精确字符串匹配**，而非正则或字符类。
+  > 旧版文档写作 `["\n\n", "\n", "。！？", ".!?", " ", ""]`，其中 `"。！？"` 作为 3 字符子串在真实文本中几乎不会连续出现，无法在中文标点处切分。因此展开为独立字符，使 splitter 能在每个句号/感叹号/问号处正确断句。
+- **keep_separator**：`True`（分隔符保留在 chunk 末尾，中文场景下保持语义完整性，如 `"他说。"` 不会被截断为 `"他说"`）
+- **chunk_size**：`800~1200` 字符（默认 `1000`，字符估算，不用精确 token）
+- **chunk_overlap**：`150` 字符（≈50 tokens，按 1 token ≈ 1.5-2 中文字符）
+- **Token 估算**：`int(len(content) / 1.5)` 字符数估算（不引入 tiktoken）；Embedding 完成后 DashScope API 返回的 `usage.total_tokens` 回写 `chunk.token_count` 覆盖估算值
 - **[Planned: Phase 3]** 结构感知分块：Markdown 标题层级感知，Phase 2 仅做固定大小分块
 
 ---
@@ -300,7 +305,11 @@ Celery Worker（异步）:
 
 ### 4.8 文档解析容错
 
-- **策略**：部分容错，单页失败跳过并记录 warning
+- **策略**：部分容错，按最小处理单元失败跳过并记录 warning
+  - PDF：逐页容错（单页 `extract_text` 异常捕获）
+  - DOCX：逐段容错（单段 `text` 属性异常捕获，空白段落跳过不计入失败）
+  - MD/TXT：整体容错（文件级异常捕获）
+- **空文档边界**：`total_pages==0` 或 `full_text` 为空时，直接标记 FAILED，不经过 `failure_rate` 计算，避免误导性错误信息（如"解析失败率 100%（0/0 页失败）"）
 - **分级判定**：
 
 | 失败比例 | 结果状态 |

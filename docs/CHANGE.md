@@ -1,5 +1,53 @@
 # DocMind 变更日志
 
+## 2026-05-21 — 代码质量修复文档同步
+
+### 修改
+- `docs/ARCHITECTURE.md` — v0.9→v0.10；§4.8 解析容错策略按格式展开（PDF 逐页/DOCX 逐段/MD TXT 整体）；新增空文档边界说明
+- `backend/docs/API.md` — v0.7→v0.8；E2009 补充「无有效内容」场景
+- `CLAUDE.md` — 后端约束新增 3 条：页码回溯实现、Token 估算算法、Celery 任务 DB 模式
+- `docs/DEVELOPMENT.md` — v0.8→v0.9；§3.1 Celery Worker 处追加 `asyncio.run()` 禁用说明
+
+## 2026-05-21 — 入库流水线代码质量修复（6 项）
+
+### 修复
+- `backend/app/rag/parser.py` — `_parse_docx` 改为逐段 try/except 容错（对齐 PDF 逐页容错粒度），每段一个 `ParsedPage`；空白段跳过不计入失败
+- `backend/app/rag/chunker.py` — `_resolve_page_number` 改用基于搜索偏移量的定位方式（`text.find(chunk_text, search_start)`），消除 `str.find` 重复片段歧义和 O(chunks×text_len) 性能问题
+- `backend/app/rag/chunker.py` — `estimate_tokens` 新增中文字符占比检测（中文 >30% → ratio=1.5，否则 ratio=4.0），修复纯英文/英文为主文档 token 严重低估问题
+- `backend/app/ingest/tasks.py` — 合并冗余 DB session，从 5-6 次 `select(Document)` 降至 3 次 `db.get(Document, doc_id)`；每个 DB session 后新增 DELETING 状态检查；新增空文档显式检测（`total_pages==0` 或 `full_text` 为空 → 明确 error_msg）
+- `backend/app/ingest/tasks.py` — `asyncio.run()` 替换为 `asyncio.new_event_loop()` + `run_until_complete()` 模式，兼容 gevent/eventlet 等已有事件循环环境
+- `backend/app/ingest/tasks.py` — `_build_error_msg` 自动识别「页/段」单位（多段落 docx 显示「段」）
+
+### 测试
+- `backend/tests/test_parser.py` — 新增 `test_空白段落被跳过_不影响容错率`、`test_DOCX单段解析异常_跳过继续`、`test_DOCX无段落`、更新 `test_正常DOCX_逐段提取`（total_pages=2）、`test_DOCX全部空白_无有效文本`
+- `backend/tests/test_chunker.py` — `TestResolvePageNumber` 适配新签名（`(start_offset, offset_map)`）；`TestEstimateTokens` 新增 `test_中文为主_占比超阈值`，更新英文/混合用例预期值
+
+### 测试结果
+- 后端：230/230 全部通过（新增 4 用例，chunker 35→37，parser 32→34，全量无回归）
+
+## 2026-05-20 — 文档进度同步更新
+
+### 修改
+- `docs/ROADMAP.md` — v0.7→v0.8；§3.2「智能分块」标记 ✅（chunker.py 已开发完成 + 35 用例全部通过）
+- `docs/TEST_CASES.md` — v0.9→v0.10；§7 覆盖率表新增 `rag/chunker.py` 行（35 用例 ✅）
+- `docs/DEVELOPMENT.md` — v0.7→v0.8；§5 依赖列表同步：`passlib[bcrypt]`→`bcrypt==4.0.*`（与 requirements.txt 一致）、补充 `rank-bm25==0.2.*`
+
+## 2026-05-20 — Phase 2 3.2 智能分块开发
+
+### 新增
+- `backend/app/rag/chunker.py` — 智能分块模块，使用 `RecursiveCharacterTextSplitter`（分隔符 `["\n\n", "\n", "。", "！", "？", ".", "!", "?", " ", ""]`，`keep_separator=True`，`chunk_size=1000`，`chunk_overlap=150`），支持页码回溯（`_build_page_offset_map` + `_resolve_page_number`）和字符数 token 估算（`int(len(content) / 1.5)`）
+- `backend/tests/test_chunker.py` — U6.6 分块逻辑单元测试（35 用例全部通过，6 个测试类）
+  - `TestChunkResult`（3）: 字段默认值、page_number 可空、estimated_tokens 类型
+  - `TestChunkingResult`（2）: 默认空结果、含分块聚合结果
+  - `TestEstimateTokens`（5）: 中文/英文/混合/短文本/空文本字符估算
+  - `TestBuildPageOffsetMap`（4）: 正常偏移构建、跳过失败页/空页、空列表
+  - `TestResolvePageNumber`（5）: 首页/中间页/末页定位、空映射、找不到
+  - `TestChunkDocument`（16）: 单块/空文本、段落/句号/换行分隔符优先级、keep_separator、chunk_size 范围、overlap 重叠、页码追踪、token 估算、中英混合文本
+
+### 修改
+- `backend/app/ingest/tasks.py` — 集成 chunker 到 Celery 流水线：解析通过容错判定后 → 状态置 `CHUNKING` → 调用 `chunk_document()` → 批量写入 MySQL `chunks` 表（含 `chroma_id`、`metadata` 页码）→ `current_stage = "chunking_done"`；空 chunk 结果标记 `FAILED`
+- `docs/ARCHITECTURE.md` — v0.8→v0.9；§4.2 分块策略分隔符从 `["\n\n", "\n", "。！？", ".!?", " ", ""]` 展开为独立字符 `["\n\n", "\n", "。", "！", "？", ".", "!", "?", " ", ""]`，补充注释说明 `RecursiveCharacterTextSplitter.separators` 是精确字符串匹配（非正则）。新增 `keep_separator=True` 配置（中文场景保留语义完整性）。
+
 ## 2026-05-20 — 跨文档一致性修复（4 处）
 
 ### 修复

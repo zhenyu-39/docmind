@@ -2,7 +2,7 @@
 
 | 属性 | 值 |
 |:---|:---|
-| 文档版本 | v0.7 |
+| 文档版本 | v0.8 |
 | 最后更新 | 2026-05-20 |
 | 作者 | yuz |
 | 状态 | 进行中 |
@@ -78,7 +78,7 @@ Week 1            Week 2           Week 2-3         Week 3         Week 3-4
 |:---|:---|:---|:---|
 | ✅ | Celery 幂等锁 | Redis `SET idempotency_key:{doc_id}:{task_type} EX 600 NX`，处理中拒绝重复入队 | 约束二 |
 | ✅ | 文档解析 | PyPDF2 + python-docx，部分容错（<20% warning / 20-50% partial / >50% failed） | 决策 #8 |
-| ⬜ | 智能分块 | `RecursiveCharacterTextSplitter`（800-1200 chars，分隔符优先级 `\n\n`→`\n`→`。！？`），字符估算 token | 决策 #1、#2 |
+| ✅ | 智能分块 | `RecursiveCharacterTextSplitter`（800-1200 chars，分隔符优先级 `\n\n`→`\n`→`。！？`），字符估算 token | 决策 #1、#2 |
 | ⬜ | Embedding 向量化 | DashScope text-embedding-v3，batch_size=20，max_retries=5 指数退避，批次级 checkpoint | 决策 #7 |
 | ⬜ | ChromaDB 批量写入 | batch_size=100，禁止单条循环；失败时全清 + 回滚 | 决策 #3 |
 | ⬜ | chunk_count 事务更新 | 全部 batch 成功后一次性事务更新 `documents.chunk_count` + `kb.chunk_count` | 决策 #4 |

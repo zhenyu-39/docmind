@@ -1,4 +1,5 @@
 """文档业务逻辑 — 上传/批量上传/列表/详情/分块/删除/重新处理"""
+from pathlib import Path
 from typing import Any
 
 from fastapi import UploadFile
@@ -132,8 +133,7 @@ async def upload_document(
     try:
         file_path = await local_storage.save(file, kb_id, doc.id)
         doc.file_path = file_path
-        from pathlib import Path as _Path
-        doc.file_size = _Path(file_path).stat().st_size
+        doc.file_size = Path(file_path).stat().st_size
         await db.flush()
         await db.refresh(doc)
     except Exception:

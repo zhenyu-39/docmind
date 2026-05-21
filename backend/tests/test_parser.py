@@ -1,7 +1,7 @@
 """文档解析器单元测试 — 覆盖 PDF/DOCX/MD/TXT 解析 + 容错阈值判定"""
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 from app.rag.parser import (
     ParsedPage,
@@ -156,7 +156,7 @@ class TestParsePdf:
         mock_reader.pages[1].extract_text.return_value = "第二页内容"
         mock_reader.pages[2].extract_text.return_value = "第三页内容"
 
-        with patch("PyPDF2.PdfReader", return_value=mock_reader):
+        with patch("app.rag.parser.PdfReader", return_value=mock_reader):
             result = _parse_pdf("test.pdf")
 
         assert result.total_pages == 3
@@ -173,7 +173,7 @@ class TestParsePdf:
         mock_reader.pages[1].extract_text.return_value = ""
         mock_reader.pages[2].extract_text.return_value = "OK"
 
-        with patch("PyPDF2.PdfReader", return_value=mock_reader):
+        with patch("app.rag.parser.PdfReader", return_value=mock_reader):
             result = _parse_pdf("test.pdf")
 
         assert result.total_pages == 3
@@ -187,7 +187,7 @@ class TestParsePdf:
         mock_reader.pages[0].extract_text.return_value = "OK"
         mock_reader.pages[1].extract_text.side_effect = RuntimeError("PDF 解析错误")
 
-        with patch("PyPDF2.PdfReader", return_value=mock_reader):
+        with patch("app.rag.parser.PdfReader", return_value=mock_reader):
             result = _parse_pdf("test.pdf")
 
         assert result.failed_pages == 1
@@ -201,14 +201,14 @@ class TestParsePdf:
         mock_reader.pages[0].extract_text.return_value = ""
         mock_reader.pages[1].extract_text.side_effect = Exception("fail")
 
-        with patch("PyPDF2.PdfReader", return_value=mock_reader):
+        with patch("app.rag.parser.PdfReader", return_value=mock_reader):
             result = _parse_pdf("test.pdf")
 
         assert result.failed_pages == 2
         assert result.failure_rate == 1.0
 
     def test_PDF文件损坏(self):
-        with patch("PyPDF2.PdfReader", side_effect=ValueError("PDF 文件已损坏")):
+        with patch("app.rag.parser.PdfReader", side_effect=ValueError("PDF 文件已损坏")):
             result = _parse_pdf("corrupted.pdf")
 
         assert result.failed_pages == 1
@@ -219,7 +219,7 @@ class TestParsePdf:
         mock_reader = MagicMock()
         mock_reader.pages = []
 
-        with patch("PyPDF2.PdfReader", return_value=mock_reader):
+        with patch("app.rag.parser.PdfReader", return_value=mock_reader):
             result = _parse_pdf("empty.pdf")
 
         assert result.total_pages == 0
@@ -229,43 +229,90 @@ class TestParsePdf:
 class TestParseDocx:
     """DOCX 解析测试（Mock python-docx）"""
 
-    def test_正常DOCX_段落提取(self):
+    def test_正常DOCX_逐段提取(self):
         mock_doc = MagicMock()
         mock_doc.paragraphs = [
             MagicMock(text="第一段内容"),
             MagicMock(text="第二段内容"),
         ]
 
-        with patch("docx.Document", return_value=mock_doc):
+        with patch("app.rag.parser.DocxDocument", return_value=mock_doc):
             result = _parse_docx("test.docx")
 
-        assert result.total_pages == 1
+        assert result.total_pages == 2  # 逐段容错：每段一个 ParsedPage
         assert result.failed_pages == 0
         assert result.failure_rate == 0.0
         assert "第一段内容" in result.full_text
         assert "第二段内容" in result.full_text
 
-    def test_DOCX空文档_无有效文本(self):
+    def test_空白段落被跳过_不影响容错率(self):
+        mock_doc = MagicMock()
+        mock_doc.paragraphs = [
+            MagicMock(text="有效段落"),
+            MagicMock(text=""),
+            MagicMock(text="   "),
+            MagicMock(text="另一有效段落"),
+        ]
+
+        with patch("app.rag.parser.DocxDocument", return_value=mock_doc):
+            result = _parse_docx("test.docx")
+
+        # 空白段落被跳过，不计入失败（仅计入 total_pages）
+        assert result.total_pages == 4
+        assert result.failed_pages == 0
+        assert result.failure_rate == 0.0
+        assert len(result.pages) == 2  # 仅有效段落创建 ParsedPage
+
+    def test_DOCX全部空白_无有效文本(self):
         mock_doc = MagicMock()
         mock_doc.paragraphs = [
             MagicMock(text=""),
             MagicMock(text="   "),
         ]
 
-        with patch("docx.Document", return_value=mock_doc):
+        with patch("app.rag.parser.DocxDocument", return_value=mock_doc):
             result = _parse_docx("empty.docx")
 
-        assert result.failed_pages == 1
+        assert result.failed_pages == 2
         assert result.failure_rate == 1.0
         assert "无有效文本" in result.pages[0].error
 
+    def test_DOCX单段解析异常_跳过继续(self):
+        bad_para = MagicMock()
+        type(bad_para).text = PropertyMock(side_effect=RuntimeError("段落损坏"))
+
+        mock_doc = MagicMock()
+        mock_doc.paragraphs = [
+            MagicMock(text="正常段落"),
+            bad_para,
+            MagicMock(text="另一正常段落"),
+        ]
+
+        with patch("app.rag.parser.DocxDocument", return_value=mock_doc):
+            result = _parse_docx("test.docx")
+
+        assert result.failed_pages == 1
+        assert result.total_pages == 3
+        assert result.pages[0].success is True
+        assert result.pages[2].success is True
+
     def test_DOCX文件损坏(self):
-        with patch("docx.Document", side_effect=ValueError("DOCX 文件损坏")):
+        with patch("app.rag.parser.DocxDocument", side_effect=ValueError("DOCX 文件损坏")):
             result = _parse_docx("corrupted.docx")
 
         assert result.failed_pages == 1
         assert result.failure_rate == 1.0
         assert "DOCX 文件损坏" in result.pages[0].error
+
+    def test_DOCX无段落(self):
+        mock_doc = MagicMock()
+        mock_doc.paragraphs = []
+
+        with patch("app.rag.parser.DocxDocument", return_value=mock_doc):
+            result = _parse_docx("empty.docx")
+
+        assert result.failed_pages == 1
+        assert "无段落" in result.pages[0].error
 
 
 class TestParseDocumentDispatch:
@@ -310,7 +357,7 @@ class TestFaultToleranceThresholds:
             mock_reader.pages[i].extract_text.return_value = f"第{i+1}页"
         mock_reader.pages[4].extract_text.return_value = ""
 
-        with patch("PyPDF2.PdfReader", return_value=mock_reader):
+        with patch("app.rag.parser.PdfReader", return_value=mock_reader):
             result = _parse_pdf("test.pdf")
 
         assert result.failure_rate == 0.2
@@ -322,7 +369,7 @@ class TestFaultToleranceThresholds:
         mock_reader.pages[1].extract_text.side_effect = Exception("fail")
         mock_reader.pages[2].extract_text.return_value = "OK"
 
-        with patch("PyPDF2.PdfReader", return_value=mock_reader):
+        with patch("app.rag.parser.PdfReader", return_value=mock_reader):
             result = _parse_pdf("test.pdf")
 
         assert 0.2 < result.failure_rate < 0.5
@@ -333,7 +380,7 @@ class TestFaultToleranceThresholds:
         mock_reader.pages[0].extract_text.return_value = "OK"
         mock_reader.pages[1].extract_text.side_effect = Exception("fail")
 
-        with patch("PyPDF2.PdfReader", return_value=mock_reader):
+        with patch("app.rag.parser.PdfReader", return_value=mock_reader):
             result = _parse_pdf("test.pdf")
 
         assert result.failure_rate == 0.5
@@ -344,7 +391,7 @@ class TestFaultToleranceThresholds:
         mock_reader.pages[0].extract_text.side_effect = Exception("fail1")
         mock_reader.pages[1].extract_text.side_effect = Exception("fail2")
 
-        with patch("PyPDF2.PdfReader", return_value=mock_reader):
+        with patch("app.rag.parser.PdfReader", return_value=mock_reader):
             result = _parse_pdf("test.pdf")
 
         assert result.failure_rate == 1.0

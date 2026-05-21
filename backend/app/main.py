@@ -11,6 +11,7 @@ from app.api.auth import router as auth_router
 from app.api.knowledge_base import router as kb_router
 from app.api.document import router as doc_router
 from app.config import settings
+from app.core.chroma_client import init_chroma
 from app.core.exceptions import AppException
 from app.middleware.auth_middleware import AuthMiddleware
 
@@ -18,8 +19,6 @@ from app.middleware.auth_middleware import AuthMiddleware
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化 ChromaDB"""
-    from app.core.chroma_client import init_chroma
-
     init_chroma()
     yield
 

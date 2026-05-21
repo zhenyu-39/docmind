@@ -11,6 +11,9 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from docx import Document as DocxDocument
+from PyPDF2 import PdfReader
+
 logger = logging.getLogger(__name__)
 
 
@@ -96,8 +99,6 @@ def parse_document(file_path: str, file_type: str | None = None) -> ParseResult:
 
 def _parse_pdf(file_path: str) -> ParseResult:
     """使用 PyPDF2 逐页解析 PDF，单页失败跳过并记录"""
-    from PyPDF2 import PdfReader
-
     try:
         reader = PdfReader(file_path)
     except Exception as e:
@@ -133,9 +134,7 @@ def _parse_pdf(file_path: str) -> ParseResult:
 
 
 def _parse_docx(file_path: str) -> ParseResult:
-    """使用 python-docx 解析 DOCX，按段落提取"""
-    from docx import Document as DocxDocument
-
+    """使用 python-docx 解析 DOCX，逐段提取并容错（对齐 PDF 逐页容错粒度）"""
     try:
         doc = DocxDocument(file_path)
     except Exception as e:
@@ -145,17 +144,39 @@ def _parse_docx(file_path: str) -> ParseResult:
             failed_pages=1,
         )
 
-    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-    if not paragraphs:
+    if not doc.paragraphs:
         return ParseResult(
-            pages=[ParsedPage(page_number=1, content="", success=False, error="文档无有效文本内容")],
+            pages=[ParsedPage(page_number=1, content="", success=False, error="文档无段落内容")],
             total_pages=1,
             failed_pages=1,
         )
 
-    content = "\n\n".join(paragraphs)
-    page = ParsedPage(page_number=1, content=content)
-    return ParseResult(pages=[page], total_pages=1, failed_pages=0)
+    pages: list[ParsedPage] = []
+    failed = 0
+
+    for i, p in enumerate(doc.paragraphs):
+        try:
+            text = p.text
+            if text and text.strip():
+                pages.append(ParsedPage(page_number=i + 1, content=text.strip()))
+        except Exception as e:
+            logger.warning(f"DOCX 第{i+1}段解析失败: {e}")
+            pages.append(ParsedPage(
+                page_number=i + 1, content="",
+                success=False, error=f"段落解析异常: {e}"
+            ))
+            failed += 1
+
+    total = len(doc.paragraphs)
+
+    if not pages:
+        return ParseResult(
+            pages=[ParsedPage(page_number=1, content="", success=False, error="文档无有效文本内容")],
+            total_pages=total,
+            failed_pages=total,
+        )
+
+    return ParseResult(pages=pages, total_pages=total, failed_pages=failed)
 
 
 def _parse_text(file_path: str) -> ParseResult:

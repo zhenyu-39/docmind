@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |:---|:---|
-| 文档版本 | v0.7 |
-| 最后更新 | 2026-05-19 |
+| 文档版本 | v0.9 |
+| 最后更新 | 2026-05-21 |
 | 作者 | yuz |
 | 状态 | 草稿 |
 
@@ -234,6 +234,8 @@ uvicorn app.main:app --reload --port 8000
 celery -A app.ingest.celery_app worker --loglevel=info
 ```
 
+> **注意**：Celery task 中禁止直接使用 `asyncio.run()`，若 Worker 使用 gevent/eventlet pool 会触发 `RuntimeError`。正确模式：`asyncio.new_event_loop()` + `run_until_complete()`，见 `app/ingest/tasks.py`。&#8203;
+
 ### 3.2 前端
 
 ```bash
@@ -320,13 +322,14 @@ aiomysql==0.2.*
 pydantic==2.*
 pydantic-settings==2.*
 python-jose[cryptography]==3.3.*
-passlib[bcrypt]==1.7.*
+bcrypt==4.0.*
 python-multipart==0.0.*
 chromadb==0.5.*
 langchain==0.3.*
 langchain-community==0.3.*
 langchain-openai==0.2.*
 jieba==0.42.*
+rank-bm25==0.2.*
 unstructured==0.16.*
 PyPDF2==3.0.*
 python-docx==1.1.*
