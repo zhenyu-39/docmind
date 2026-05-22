@@ -11,6 +11,17 @@
 - **Celery 任务在 commit 前被消费导致状态不一致**（`document_service.py`）：`upload_document` / `delete_document` / `reprocess_document` / force 覆盖路径 — 所有 `delay()` 分发前加 `await db.commit()`。原仅 `flush()` 后分发，`get_db()` 依赖注入在路由返回后才 commit，Worker 在 commit 前捡到任务时查到的仍是旧状态（如 delete 任务看到 completed 而非 deleting → 跳过删除 → 文档永久卡在 deleting）
 - **SQLAlchemy passive_deletes 导致删除文档报 IntegrityError**（`document.py` / `knowledge_base.py`）：`Document.chunks`、`KnowledgeBase.documents`、`KnowledgeBase.chunks` 三处 `relationship()` 添加 `passive_deletes=True`。SQLAlchemy 默认 `passive_deletes=False`，删除父对象前会先加载子对象并 SET FK=NULL 再让数据库 CASCADE 删除，但 chunk 的 `doc_id`/`kb_id` 为 NOT NULL，SET NULL 触发 `(1048, "Column 'doc_id' cannot be null")`。加 `passive_deletes=True` 跳过中间步骤，直接由数据库 FK CASCADE 处理
 
+### 修改
+- **批量上传错误信息丢失诊断细节**（`document_service.py`）：batch failed 的 `reason` 增加 `error_detail` 拼接。原仅 `error_code:error_message`（如 `E2011: 文档正在处理中`），用户无法判断是重名拦截还是真的在处理；现追加 detail（如 `（文档 'xxx' 正在处理中（状态：uploaded），请等待处理完成）`）
+- **批量上传接口 message 语义不明确**（`api/document.py`）：message 改为含计数格式 `批量上传完成（2 个文件，成功 1 个，失败 1 个）`，前端无需解析 data 就能感知有失败项。HTTP 200 + 部分成功为批量接口设计意图，前端须检查 `data.failed` 数组
+
+### 文档同步
+- **`docs/ARCHITECTURE.md` v0.11→v0.12**：§4.4 EMBED_BATCH_SIZE 20→10 并标注 DashScope 上限；§4.6 锁键格式更新为 `doc_lock:{doc_id}`（ingest/delete 共享互斥）；§7.1 ChromaDB 初始化改为懒加载描述（覆盖 FastAPI + Celery Worker 双运行时）；§4.9 Celery 配置示例补充 `autoretry_for` + `retry_backoff` + 持久化事件循环说明；§4.5 删除流程补充 `chunk_count`/`doc_count` 原子递减步骤；§4.1 入库流程图补充 force=true 覆盖分支（终态→异步删旧→建新）；§4.1 补充 reprocess ChromaDB 旧向量清理说明
+- **`backend/docs/API.md` v0.8→v0.9**：§4 batch-upload 响应示例更新 message 含计数格式；failed reason 更新为含 detail 诊断信息；新增 message 约定和前端检查 data.failed 的提示
+- **`backend/docs/DATABASE.md` v0.5→v0.6**：§4 外键策略补充「SQLAlchemy ORM 行为注意事项」，说明 `passive_deletes=False` 默认行为与 NOT NULL 列的冲突及解决方案；§2.2 `chunk_count`/`doc_count` 字段说明补充删除时原子递减维护要求
+- **`docs/DEVELOPMENT.md` v0.10→v0.11**：§3.1 Celery Worker 启动命令区分 Linux/Mac 和 Windows（`--pool=solo`）；新增 Windows 特别注意事项（pool 选型、事件循环策略、solo 并发限制）
+- **`CLAUDE.md`**：关键约定新增 Service/Celery 任务命名隔离规则 + `delay()` 分发前必须显式 `commit()` 规则；常用命令 Celery 启动加 `--pool=solo`
+
 ## 2026-05-21 — 审查报告 10 项质量修复
 
 ### 修复

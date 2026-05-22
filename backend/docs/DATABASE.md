@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |:---|:---|
-| 文档版本 | v0.5 |
-| 最后更新 | 2026-05-20 |
+| 文档版本 | v0.6 |
+| 最后更新 | 2026-05-22 |
 | 作者 | yuz |
 | 状态 | 草稿 |
 
@@ -81,8 +81,8 @@ CREATE TABLE knowledge_bases (
 | description | TEXT | 知识库描述 |
 | user_id | BIGINT | 创建者用户 ID |
 | status | ENUM | active（正常）/ deleting（异步清理中，随后物理删除行） |
-| chunk_count | INT | 分块总数（冗余缓存，避免 COUNT 查询） |
-| doc_count | INT | 文档总数（冗余缓存） |
+| chunk_count | INT | 分块总数（冗余缓存，避免 COUNT 查询）。文档/KB 删除时须用 `GREATEST(0, chunk_count - N)` 原子递减 |
+| doc_count | INT | 文档总数（冗余缓存）。文档删除时须用 `GREATEST(0, doc_count - 1)` 原子递减 |
 | created_at | DATETIME | 创建时间 |
 | updated_at | DATETIME | 更新时间 |
 
@@ -291,6 +291,13 @@ CREATE TABLE messages (
 - 外键约束在数据库层保证引用完整性，避免程序 Bug 产生脏数据（如指向不存在的 `kb_id`）
 - SQLAlchemy 模型中必须同步声明 `sa.ForeignKey(...)`，与 Alembic 迁移脚本保持一致
 - 模型中应补充 `relationship` 定义，支持 ORM 级联操作和跨表查询
+
+**SQLAlchemy ORM 行为注意事项**：
+- `ON DELETE CASCADE` 是**数据库层**的级联行为，SQLAlchemy ORM 默认**不会**自动感知
+- SQLAlchemy `relationship()` 默认 `passive_deletes=False`：删除父对象前，ORM 会先加载所有子对象并尝试 `SET FK=NULL`，再由数据库执行 CASCADE 删除
+- **当子表 FK 列为 NOT NULL 时**（如 `chunks.doc_id`、`chunks.kb_id`），`SET NULL` 操作会触发 `IntegrityError (1048, "Column 'doc_id' cannot be null")`
+- **解决方案**：所有 NOT NULL 外键列对应的 `relationship()` 必须添加 `passive_deletes=True`，告知 ORM 跳过 SET NULL 步骤，直接由数据库 FK CASCADE 处理级联删除
+- 当前已配置 `passive_deletes=True` 的关系：`Document.chunks`、`KnowledgeBase.documents`、`KnowledgeBase.chunks`
 
 ---
 

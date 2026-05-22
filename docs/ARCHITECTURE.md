@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |:---|:---|
-| 文档版本 | v0.11 |
-| 最后更新 | 2026-05-21 |
+| 文档版本 | v0.12 |
+| 最后更新 | 2026-05-22 |
 | 作者 | yuz |
 | 状态 | 草稿 |
 
@@ -195,8 +195,11 @@ FastAPI 接收文件:
   - 大小校验（≤ 50MB）
   - 幂等检查（Redis SET NX）
   - 同名检查（kb_id + filename）
-  - 保存文件至 uploads/{kb_id}/{doc_id}/{uuid}_{sanitized_filename}
-  - 创建 document 记录(status=uploaded)
+    ├── 无同名 → 保存文件 + 创建记录(status=uploaded)
+    ├── 同名 + 处理中 + force=false → 拒绝 E2011
+    ├── 同名 + 处理中 + force=true → 拒绝 E2012（无法覆盖处理中文档）
+    └── 同名 + 终态 + force=true → 旧文档标记 deleting → commit → dispatch delete_document.delay()
+                              → 创建新记录(status=uploaded)
     ↓
 dispatch Celery Task: ingest_document(doc_id)
     ↓
@@ -217,6 +220,8 @@ MySQL chunk_count 事务更新 + kb.chunk_count 同步更新
 ```
 
 > **注意**：Celery Worker crash 后重启，可根据 `current_stage` 和 `last_success_batch` 从断点恢复，不重复处理已成功的步骤/批次。
+> 
+> **reprocess 流程**：仅 `partial_failed` / `failed` 终态允许触发。流程为：`collection.delete(where={"doc_id": doc_id})` 清理 ChromaDB 旧向量 → 删除 MySQL 旧 chunk 记录（FK CASCADE）→ 重置 status 为 uploaded → 重新 dispatch `ingest_document`。必须在重置状态前清理 ChromaDB，否则新文档分块数少于旧文档时残留向量无法被覆盖。
 
 ---
 
@@ -255,7 +260,7 @@ MySQL chunk_count 事务更新 + kb.chunk_count 同步更新
 
 ### 4.4 Embedding 批量与重试
 
-- **批次大小**：`EMBED_BATCH_SIZE=20`（配置化）
+- **批次大小**：`EMBED_BATCH_SIZE=10`（配置化，DashScope text-embedding-v3 单次上限 10 条）
 - **重试**：`max_retries=5`，指数退避（1s → 2s → 4s → 8s → 16s）
 - **批次级 checkpoint**：失败时从当前批次恢复，不重新处理已成功的批次
 - **失败清理**：ChromaDB `add()` 非原子操作，任一 batch 失败 → 清理所有 batch 数据 → 标记 FAILED，保证 MySQL 与 ChromaDB 一致
@@ -273,12 +278,16 @@ Celery Worker（异步）:
   2. 删除磁盘文件（uploads/{kb_id}/{doc_id}/ 目录）
   3. DELETE FROM documents WHERE id=?  — 物理删除文档记录
      └─ FK ON DELETE CASCADE 自动级联删除 chunks
+  4. UPDATE knowledge_bases SET
+       doc_count = GREATEST(0, doc_count - 1),
+       chunk_count = GREATEST(0, chunk_count - N)  — 原子递减计数
 ```
+> **注意**：`chunk_count` / `doc_count` 须在物理删除文档后使用 `func.greatest(0, col - N)` 原子递减，防止并发场景下计数为负。
 > 当前 Celery Worker 已定义 `delete_document` 任务骨架，实际清理逻辑待后续任务实现。
 
 ### 4.6 Celery 幂等性
 
-- **幂等键格式**：`idempotency_key:{doc_id}:{task_type}`（如 `123:ingest`）
+- **幂等键格式**：`doc_lock:{doc_id}`（ingest 与 delete 共享互斥锁，防止并发冲突）
 - **实现**：Redis 分布式锁 `SET key "locked" EX 600 NX`
 - **锁过期时间**：600s（与 `soft_time_limit` 对齐）
 - **触发规则**：
@@ -326,10 +335,12 @@ CELERY_BROKER_URL = "redis://localhost:6379/2"
 CELERY_RESULT_BACKEND = "redis://localhost:6379/1"
 
 # 入库任务（耗时较长，放宽超时）
-@app.task(bind=True, max_retries=3, soft_time_limit=600)
+# 注意：使用 autoretry_for 让 Celery 自动重试未捕获异常，禁止在外层 catch-all except 吞噬异常
+@app.task(bind=True, max_retries=3, soft_time_limit=600, autoretry_for=(Exception,), retry_backoff=True)
 def ingest_document(self, doc_id):
     ...
 ```
+- **Worker 事件循环**：Celery Worker 进程须使用持久化事件循环（`_get_worker_loop()` 复用同一 `asyncio.new_event_loop()`），禁止每次任务新建/关闭 loop，否则 SQLAlchemy 连接池中的连接会挂在旧 loop 上，后续任务复用时触发 `attached to a different loop` 错误
 
 ---
 
@@ -460,7 +471,7 @@ collection.delete(where={"kb_id": kb_id})
 **持久化与连接**：
 - ChromaDB 使用 `PersistentClient`，数据持久化到 `backend/chroma_data/chroma.sqlite3`
 - 持久化目录由 `.env` 中的 `CHROMA_PERSIST_DIR` 配置（默认 `./chroma_data`）
-- 应用启动时（`main.py` lifespan）自动初始化并获取/创建 collection
+- ChromaDB 采用**懒加载自动初始化**：`get_collection()` / `get_client()` 首次调用时自动初始化 PersistentClient 并获取/创建 collection，无需显式调用 `init_chroma()`。这确保 FastAPI（lifespan）和 Celery Worker（独立进程）两种运行时都能正确初始化
 - Collection 索引使用 `hnsw:space=cosine`（余弦相似度）
 
 ### 7.2 BM25 实现方案

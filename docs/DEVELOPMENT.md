@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |:---|:---|
-| 文档版本 | v0.10 |
-| 最后更新 | 2026-05-21 |
+| 文档版本 | v0.11 |
+| 最后更新 | 2026-05-22 |
 | 作者 | yuz |
 | 状态 | 草稿 |
 
@@ -228,10 +228,18 @@ alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 
 # 6. 启动 Celery Worker（另一个终端）
+# Linux/Mac:
 celery -A app.ingest.celery_app worker --loglevel=info
+# Windows（必须加 --pool=solo，eventlet 与 asyncio 不兼容）:
+celery -A app.ingest.celery_app worker --loglevel=info --pool=solo
 ```
 
-> **注意**：Celery task 中禁止直接使用 `asyncio.run()`，若 Worker 使用 gevent/eventlet pool 会触发 `RuntimeError`。正确模式：`asyncio.new_event_loop()` + `run_until_complete()`，见 `app/ingest/tasks.py`。&#8203;
+> **注意**：Celery task 中禁止直接使用 `asyncio.run()`，若 Worker 使用 gevent/eventlet pool 会触发 `RuntimeError`。正确模式：`asyncio.new_event_loop()` + `run_until_complete()`，见 `app/ingest/tasks.py`。
+> 
+> **Windows 特别注意**：
+> - Celery Worker 必须使用 `--pool=solo`（单进程池），`eventlet` / `gevent` pool 的 monkey-patch 与 asyncio 事件循环冲突，会导致任务收到后静默卡死
+> - `aiomysql` 依赖 `SelectorEventLoop`，Windows 默认使用 `ProactorEventLoop`。`celery_app.py` 启动时已自动设置 `WindowsSelectorEventLoopPolicy()`，无需手动干预
+> - `solo` 池一次只处理一个任务，本地开发够用；生产环境 Windows 上可起多个 Worker 进程实现并发&#8203;
 
 ### 3.2 前端
 

@@ -2,8 +2,8 @@
 
 | 属性 | 值 |
 |:---|:---|
-| 文档版本 | v0.8 |
-| 最后更新 | 2026-05-21 |
+| 文档版本 | v0.9 |
+| 最后更新 | 2026-05-22 |
 | 作者 | yuz |
 | 状态 | 草稿 |
 
@@ -431,24 +431,26 @@ def is_terminal(status: str) -> bool:
 |:---|:---|:---|:---|
 | files | file[] | 是 | 多文件（每个 ≤ 50MB） |
 
-**响应** (200) — 部分成功，非事务性：
+**响应** (200) — 部分成功，非事务性。前端**必须**检查 `data.failed` 数组，不能仅依赖 HTTP 状态码判断是否全部成功：
 
 ```json
 {
   "code": "0",
-  "message": "批量上传完成",
+  "message": "批量上传完成（3 个文件，成功 2 个，失败 1 个）",
   "data": {
     "success": [
       { "id": 5, "filename": "入职指南.pdf", "status": "uploaded" },
       { "id": 6, "filename": "报销制度.md", "status": "uploaded" }
     ],
     "failed": [
-      { "filename": "旧文档.doc", "reason": "E2002: 不支持 .doc 格式，请先转换为 .docx" },
-      { "filename": "入职指南.pdf", "reason": "E2013: 文档名称已存在" }
+      { "filename": "旧文档.doc", "reason": "E2002: 不支持 .doc 格式（扩展名 .doc 不在允许列表中）" },
+      { "filename": "入职指南.pdf", "reason": "E2013: 文档名称已存在（kb_id=1，使用 force=true 可覆盖）" }
     ]
   }
 }
 ```
+
+> **message 约定**：批量操作 message 必须包含成功/失败计数摘要（格式：`批量上传完成（N 个文件，成功 M 个，失败 K 个）`），便于前端在不解析 data 的情况下快速感知是否有失败项。
 
 ---
 

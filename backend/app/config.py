@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     CHROMA_BATCH_SIZE: int = 100
 
     # Embedding
-    EMBED_BATCH_SIZE: int = 20
+    EMBED_BATCH_SIZE: int = 10  # DashScope text-embedding-v3 单次上限 10 条
     DEBUG_CHUNK_FULL: bool = False
 
     # LLM (OpenAI 兼容)

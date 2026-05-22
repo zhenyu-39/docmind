@@ -31,9 +31,14 @@ async def batch_upload(
     data = await batch_upload_documents(
         db, kb_id, current_user["user_id"], current_user["role"], files
     )
-    return {"code": "0", "message": "批量上传完成", "data": data.model_dump()}
+    total = len(data.success) + len(data.failed)
+    msg = f"批量上传完成（{total} 个文件，成功 {len(data.success)} 个"
+    if data.failed:
+        msg += f"，失败 {len(data.failed)} 个"
+    msg += "）"
+    return {"code": "0", "message": msg, "data": data.model_dump()}
 
-#
+
 @router.post("/{kb_id}/documents", status_code=201)
 async def upload(
     kb_id: int,
