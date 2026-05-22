@@ -74,6 +74,21 @@ describe('AppLayout', () => {
     expect(wrapper.find('.page-title').text()).toBe('会话管理')
   })
 
+  it('KnowledgeList 路由显示"我的知识库"', () => {
+    const wrapper = getComponent('KnowledgeList')
+    expect(wrapper.find('.page-title').text()).toBe('我的知识库')
+  })
+
+  it('KnowledgeDetail 路由显示"知识库详情"', () => {
+    const wrapper = getComponent('KnowledgeDetail')
+    expect(wrapper.find('.page-title').text()).toBe('知识库详情')
+  })
+
+  it('AdminStats 路由显示"系统概览"', () => {
+    const wrapper = getComponent('AdminStats')
+    expect(wrapper.find('.page-title').text()).toBe('系统概览')
+  })
+
   it('未知路由显示默认标题"DocMind"', () => {
     const wrapper = getComponent('UnknownPage')
     expect(wrapper.find('.page-title').text()).toBe('DocMind')

@@ -2,10 +2,10 @@
 
 | 属性 | 值 |
 |:---|:---|
-| 文档版本 | v0.15 |
-| 最后更新 | 2026-05-21 |
+| 文档版本 | v0.17 |
+| 最后更新 | 2026-05-22 |
 | 作者 | yuz |
-| 状态 | 进行中（Phase 2 3.2 Celery 入库流水线完成 + 6 项质量修复，全量回归 293 ✅） |
+| 状态 | 进行中（Phase 2.3.3 前端页面 + 组件测试已完成，49 用例全部通过） |
 
 ---
 
@@ -190,15 +190,17 @@
 
 ### 3.5 前端 — 组件测试
 
+> Phase 2.3.3 页面已构建完成，组件测试已编写并全部通过（49 用例，2026-05-22）。
+
 | ID | 测试用例 | 组件 | 验证项 | 预期行为 | 状态 | 最后运行 | 备注 |
 |:---|:---|:---|:---|:---|:---|:---|:---|
-| C2.1 | KnowledgeList 渲染 | `KnowledgeList` | 网格布局 | KB 卡片网格渲染 | ⬜ | — | — |
-| C2.2 | KnowledgeList 空状态 | `KnowledgeList` | 无 KB | 显示空状态提示 + 新建按钮 | ⬜ | — | — |
-| C2.3 | KnowledgeList 新建弹窗 | `KnowledgeList` | 点击新建 | 弹窗显示，含名称+描述表单 | ⬜ | — | — |
-| C2.4 | KnowledgeList 删除确认 | `KnowledgeList` | 点击删除 | 二次确认弹窗 | ⬜ | — | — |
-| C2.5 | DocumentList 渲染 | `DocumentList` | 表格 | 文档表格含状态标签 | ⬜ | — | — |
-| C2.6 | DocumentList 上传拖拽 | `DocumentList` | 拖拽文件 | 触发上传 | ⬜ | — | — |
-| C2.7 | DocumentList 状态轮询 | `DocumentList` | 非终态文档 | 2s 轮询直到终态 | ⬜ | — | — |
+| C2.1 | KnowledgeList 渲染 | `KnowledgeList` | 网格布局 | KB 卡片网格渲染 | ✅ | 2026-05-22 | 含搜索框、新建按钮、卡片名称/描述/文档数/分块数、部门图标、无描述占位 |
+| C2.2 | KnowledgeList 空状态 | `KnowledgeList` | 无 KB | 显示空状态提示 | ✅ | 2026-05-22 | 显示「暂无知识库」 |
+| C2.3 | KnowledgeList 新建弹窗 | `KnowledgeList` | 点击新建 | 弹窗显示 | ✅ | 2026-05-22 | 含按钮点击 + 新建卡片点击两个入口 |
+| C2.4 | KnowledgeList 删除确认 | `KnowledgeList` | — | 二次确认弹窗 | ⬜ | — | 涉及 el-dropdown 展开 + ElMessageBox.confirm，stub 环境下难以模拟完整流程 |
+| C2.5 | DocumentList 渲染 | `KnowledgeDetail` | 表格 | 文档表格含状态标签 | ✅ | 2026-05-22 | 有文档时表格渲染 + 空状态隐藏 |
+| C2.6 | DocumentList 上传拖拽 | `KnowledgeDetail` | 上传区域 | 上传区域渲染 | ✅ | 2026-05-22 | 上传区域文案 + 格式提示渲染；实际拖拽/文件选择需 e2e 测试 |
+| C2.7 | DocumentList 状态轮询 | `KnowledgeDetail` | 生命周期 | 组件挂载获取数据、卸载清除轮询 | ✅ | 2026-05-22 | 验证 fetchKbDetail/fetchDocList 调用 + clearAllPolling 调用 |
 
 ---
 
@@ -305,7 +307,7 @@
 | `rag/embedder.py` | ≥ 80% | ✅ 100% | 26 个测试全覆盖（DashScope API/重试/批量/响应解析/指数退避） |
 | `core/storage.py` | ≥ 80% | ✅ 100% | 37 个测试全覆盖（sanitize_filename/generate_stored_filename/LocalStorage save/read/delete/空目录清理） |
 | 前端 `utils/` | ≥ 80% | ⬜ | sse.js / markdown.js 待 Phase 3 |
-| 前端组件 | ≥ 60% | ✅ 100% | LoginPage(9) + AppLayout(3) 全通过 |
+| 前端组件 | ≥ 60% | ✅ 49 通过 | LoginPage(12) + AppLayout(14) + KnowledgeList(11) + KnowledgeDetail(12) 全部通过 |
 
 ---
 

@@ -2,7 +2,7 @@
 
 | 属性 | 值 |
 |:---|:---|
-| 文档版本 | v0.11 |
+| 文档版本 | v0.12 |
 | 最后更新 | 2026-05-22 |
 | 作者 | yuz |
 | 状态 | 草稿 |
@@ -198,8 +198,10 @@ docmind/
 │   │
 │   └── tests/                         # 前端测试（vitest + @vue/test-utils）
 │       ├── setup.js                   # 全局 Mock & 配置
-│       ├── LoginPage.test.js          # 登录页组件测试
-│       └── AppLayout.test.js          # 布局组件测试
+│       ├── LoginPage.test.js          # 登录页组件测试（12 用例）
+│       ├── AppLayout.test.js          # 布局组件测试（14 用例）
+│       ├── KnowledgeList.test.js      # 知识库列表页组件测试（11 用例）
+│       └── KnowledgeDetail.test.js    # 知识库详情页组件测试（12 用例）
 ```
 
 ---
