@@ -2,7 +2,7 @@
 
 | 属性 | 值 |
 |:---|:---|
-| 文档版本 | v0.9 |
+| 文档版本 | v0.10 |
 | 最后更新 | 2026-05-21 |
 | 作者 | yuz |
 | 状态 | 草稿 |
@@ -34,19 +34,24 @@ docmind/
 │   ├── ROADMAP.md                     # 开发排期
 │   ├── DEVELOPMENT.md                 # 开发指南（本文件）
 │   ├── TESTING.md                     # 测试策略
+│   ├── TEST_CASES.md                  # 测试用例跟踪
 │   └── CHANGE.md                      # 变更日志
 │
 ├── backend/
 │   ├── .env                           # 环境变量（在 backend/ 下，不在根目录！）
 │   ├── requirements.txt
+│   ├── pytest.ini
 │   ├── alembic.ini
 │   ├── alembic/                       # 数据库迁移
+│   │   ├── env.py
+│   │   └── versions/
 │   │
 │   ├── docs/                          # 后端设计文档
 │   │   ├── API.md                     # 接口文档
 │   │   └── DATABASE.md                # 数据库设计文档
 │   │
 │   ├── app/
+│   │   ├── __init__.py
 │   │   ├── main.py                    # FastAPI 入口
 │   │   ├── config.py                  # 配置管理（读取 .env）
 │   │   ├── dependencies.py            # 依赖注入（DB session, current_user）
@@ -57,7 +62,7 @@ docmind/
 │   │   │   ├── knowledge_base.py      # 知识库 CRUD
 │   │   │   ├── document.py            # 文档上传 & 管理
 │   │   │   ├── conversation.py        # 会话管理
-│   │   │   ├── chat.py                # 问答接口（SSE）
+│   │   │   ├── chat.py                # 问答接口（SSE，占位）
 │   │   │   └── admin.py               # 管理后台
 │   │   │
 │   │   ├── models/                    # SQLAlchemy ORM 模型
@@ -74,56 +79,53 @@ docmind/
 │   │   │   ├── __init__.py
 │   │   │   ├── auth.py                # RegisterRequest / LoginRequest / TokenResponse
 │   │   │   ├── knowledge_base.py      # KnowledgeBaseCreate / KnowledgeBaseResponse
-│   │   │   ├── document.py            # DocumentResponse / DocumentListResponse
+│   │   │   ├── document.py            # DocumentUploadResponse / DocumentListResponse 等
 │   │   │   ├── conversation.py        # ConversationCreate / ConversationResponse
 │   │   │   └── chat.py                # ChatRequest / ChatSSEEvent
 │   │   │
 │   │   ├── services/                  # 业务逻辑层
 │   │   │   ├── __init__.py
-│   │   │   ├── auth_service.py         # 注册/登录逻辑
-│   │   │   ├── knowledge_base_service.py  # 知识库 CRUD
-│   │   │   ├── document_service.py     # 文档上传/状态管理
+│   │   │   ├── auth_service.py        # 注册/登录逻辑
+│   │   │   ├── knowledge_base_service.py  # 知识库 CRUD + 删除
+│   │   │   ├── document_service.py    # 文档上传/列表/删除/reprocess
 │   │   │   ├── conversation_service.py # 会话管理
-│   │   │   └── chat_service.py        # 问答核心流程
+│   │   │   └── chat_service.py        # 问答核心流程（占位）
 │   │   │
 │   │   ├── rag/                       # RAG 核心模块
 │   │   │   ├── __init__.py
-│   │   │   ├── parser.py              # 文档解析器
-│   │   │   ├── chunker.py             # 文本分块策略
-│   │   │   ├── embedder.py            # Embedding 封装
-│   │   │   ├── retriever.py           # 检索器（向量 + BM25）
-│   │   │   ├── reranker.py            # 重排序（NoopReranker / DashScopeReranker）
-│   │   │   ├── prompt_builder.py      # Prompt 模板
-│   │   │   └── intent.py              # 意图识别 + 问题重写
+│   │   │   ├── parser.py              # 文档解析器（PDF/DOCX/MD/TXT）
+│   │   │   ├── chunker.py             # 文本分块策略（RecursiveCharacterTextSplitter）
+│   │   │   ├── embedder.py            # Embedding 封装（DashScope text-embedding-v3）
+│   │   │   ├── retriever.py           # 检索器（向量 + BM25，占位 Phase 3）
+│   │   │   ├── reranker.py            # 重排序（当前 NoopReranker 占位）
+│   │   │   ├── prompt_builder.py      # Prompt 模板（占位）
+│   │   │   └── intent.py              # 意图识别 + 问题重写（占位 Phase 4/5）
 │   │   │
 │   │   ├── ingest/                    # 入库任务模块
 │   │   │   ├── __init__.py
 │   │   │   ├── celery_app.py          # Celery 配置
-│   │   │   ├── lock.py                # Celery 幂等锁（Redis SET NX）
-│   │   │   └── tasks.py               # 入库任务（ingest_document）
+│   │   │   ├── lock.py                # Celery 幂等锁（Redis SET NX, ingest/delete 共享互斥）
+│   │   │   └── tasks.py               # 入库/删除/KB删除 Celery 任务
 │   │   │
 │   │   ├── core/                      # 基础设施
 │   │   │   ├── __init__.py
-│   │   │   ├── database.py            # 数据库连接 & session
-│   │   │   ├── chroma_client.py       # ChromaDB 连接
+│   │   │   ├── database.py            # 数据库连接 & async session
+│   │   │   ├── chroma_client.py       # ChromaDB 连接（单 collection docmind）
 │   │   │   ├── redis_client.py        # Redis 客户端（懒加载单例）
 │   │   │   ├── security.py            # JWT & 密码哈希
 │   │   │   ├── sse.py                 # SSE 发送工具
 │   │   │   ├── storage.py             # 文件存储抽象（当前本地，后续 OSS）
-│   │   │   └── exceptions.py          # 自定义异常
+│   │   │   └── exceptions.py          # 自定义异常（AppException 基类）
 │   │   │
 │   │   └── middleware/
 │   │       ├── __init__.py
 │   │       └── auth_middleware.py      # JWT 验证中间件
 │   │
-│   ├── chroma_data/                   # ChromaDB 持久化目录（chroma.sqlite3）
-│   ├── knowledge_samples/             # 示例知识库文档
-│   │
 │   ├── tests/                         # 后端测试（pytest + httpx）
 │   │   ├── __init__.py
-│   │   ├── conftest.py                # pytest fixtures（async client, test DB session）
+│   │   ├── conftest.py                # pytest fixtures（async client, mock DB, auth headers）
 │   │   ├── test_security.py           # JWT & 密码哈希单元测试
-│   │   ├── test_storage.py            # 文件存储服务单元测试（本地存储 put/get/delete + 路径生成）
+│   │   ├── test_storage.py            # 文件存储服务单元测试（37 用例）
 │   │   ├── test_auth_service.py       # 认证业务逻辑单元测试
 │   │   ├── test_auth_api.py           # 认证接口集成测试
 │   │   ├── test_schemas.py            # Pydantic Schema 校验测试
@@ -131,17 +133,12 @@ docmind/
 │   │   ├── test_kb_api.py             # 知识库 CRUD 接口测试
 │   │   ├── test_document_api.py       # 文档上传/删除接口测试
 │   │   ├── test_idempotent_lock.py    # Celery 幂等锁单元测试
-│   │   ├── test_ingest_tasks.py        # Celery 入库流水线集成测试（阶段状态机/batch checkpoint/容错判定）
-│   │   ├── test_parser.py             # 文档解析器单元测试（PDF/DOCX/MD/TXT + 容错阈值）
-│   │   ├── test_chunker.py            # 文本分块策略单元测试
-│   │   ├── test_embedder.py           # Embedding 向量化单元测试（批次级 checkpoint）
-│   │   ├── test_retriever.py          # 检索器单元测试（向量+BM25）
-│   │   ├── test_rrf.py                # RRF 融合算法测试
-│   │   ├── test_chat_api.py           # 问答 SSE 接口测试
-│   │   ├── eval_retrieval.py          # 离线检索评估脚本
-│   │   ├── regression_test.py         # 回归测试脚本
-│   │   └── locustfile.py              # 压测脚本（Locust）
+│   │   ├── test_tasks.py              # Celery 入库流水线测试（断点恢复/checkpoint/阶段检测，11 用例）
+│   │   ├── test_parser.py             # 文档解析器单元测试
+│   │   ├── test_chunker.py            # 文本分块策略单元测试（35 用例）
+│   │   └── test_embedder.py           # Embedding 向量化单元测试（API 调用/重试/响应解析）
 │   │
+│   ├── chroma_data/                   # ChromaDB 持久化目录
 │   └── uploads/                       # 上传文件存储目录
 │
 ├── frontend/
@@ -153,56 +150,56 @@ docmind/
 │   ├── package.json
 │   ├── package-lock.json
 │   ├── vite.config.js
+│   ├── vitest.config.js
 │   │
-│   └── src/
-│       ├── App.vue                    # 根组件（路由感知布局切换）
-│       ├── main.js                    # Vue 应用入口
-│       │
-│       ├── views/                     # 页面
-│       │   ├── ChatPage.vue           # 问答页（核心）
-│       │   ├── LoginPage.vue          # 登录页
-│       │   └── admin/
-│       │       ├── KnowledgeList.vue  # 知识库管理
-│       │       ├── DocumentList.vue   # 文档管理
-│       │       └── ConversationList.vue # 会话管理
-│       │
-│       ├── components/
-│       │   ├── chat/
-│       │   │   ├── ChatInput.vue      # 输入框 + 发送 + 停止
-│       │   │   ├── MessageList.vue    # 消息列表容器
-│       │   │   ├── MessageItem.vue    # 单条消息气泡
-│       │   │   └── WelcomeScreen.vue  # 空状态欢迎页
-│       │   └── layout/
-│       │       ├── AppLayout.vue      # 布局容器（Sidebar + 主内容）
-│       │       └── Sidebar.vue        # 侧边栏（会话列表 + 管理导航）
-│       │
-│       ├── stores/                    # Pinia 状态管理
-│       │   ├── auth.js                # 认证状态（token/用户/login/logout）
-│       │   ├── chat.js                # 聊天状态（messages/streaming/send/abort）
-│       │   └── knowledge.js           # 知识库状态（kbList/currentKb/docList）
-│       │
-│       ├── api/                       # HTTP 请求封装
-│       │   ├── index.js               # Axios 实例 + 拦截器
-│       │   ├── auth.js                # register / login
-│       │   ├── knowledge.js           # 知识库/文档相关 API
-│       │   ├── conversation.js        # 会话相关 API
-│       │   └── chat.js                # 问答 SSE 请求
-│       │
-│       ├── router/
-│       │   └── index.js               # Vue Router + 三级路由守卫
-│       │
-│       ├── utils/
-│       │   ├── sse.js                 # SSE 事件解析
-│       │   └── markdown.js            # Markdown 渲染
-│       │
-│       └── tests/                     # 前端测试（vitest + @vue/test-utils）
-│           ├── setup.js               # 全局 Mock & 配置
-│           ├── LoginPage.test.js      # 登录页组件测试
-│           ├── AppLayout.test.js      # 布局组件测试
-│           ├── ChatPage.test.js       # 问答页组件测试
-│           ├── KnowledgeList.test.js  # 知识库管理页组件测试
-│           ├── DocumentList.test.js   # 文档管理页组件测试
-│           └── sse.test.js            # SSE 解析工具测试
+│   ├── src/
+│   │   ├── App.vue                    # 根组件（路由感知布局切换）
+│   │   ├── main.js                    # Vue 应用入口
+│   │   │
+│   │   ├── views/                     # 页面
+│   │   │   ├── ChatPage.vue           # 问答页（核心）
+│   │   │   ├── LoginPage.vue          # 登录页
+│   │   │   └── admin/
+│   │   │       ├── KnowledgeList.vue  # 知识库管理
+│   │   │       ├── DocumentList.vue   # 文档管理
+│   │   │       └── ConversationList.vue # 会话管理
+│   │   │
+│   │   ├── components/
+│   │   │   ├── chat/
+│   │   │   │   ├── ChatInput.vue      # 输入框 + 发送 + 停止
+│   │   │   │   ├── MessageList.vue    # 消息列表容器
+│   │   │   │   ├── MessageItem.vue    # 单条消息气泡
+│   │   │   │   └── WelcomeScreen.vue  # 空状态欢迎页
+│   │   │   └── layout/
+│   │   │       ├── AppLayout.vue      # 布局容器（Sidebar + 主内容）
+│   │   │       └── Sidebar.vue        # 侧边栏（会话列表 + 管理导航）
+│   │   │
+│   │   ├── stores/                    # Pinia 状态管理
+│   │   │   ├── auth.js                # 认证状态（token/用户/login/logout）
+│   │   │   ├── chat.js                # 聊天状态（messages/streaming/send/abort）
+│   │   │   └── knowledge.js           # 知识库状态（kbList/currentKb/docList）
+│   │   │
+│   │   ├── api/                       # HTTP 请求封装
+│   │   │   ├── index.js               # Axios 实例 + 拦截器
+│   │   │   ├── auth.js                # register / login
+│   │   │   ├── knowledge.js           # 知识库/文档相关 API
+│   │   │   ├── conversation.js        # 会话相关 API
+│   │   │   └── chat.js                # 问答 SSE 请求
+│   │   │
+│   │   ├── router/
+│   │   │   └── index.js               # Vue Router + 路由守卫
+│   │   │
+│   │   ├── styles/
+│   │   │   └── global.css             # 全局样式（Design Token --dm-* 变量）
+│   │   │
+│   │   └── utils/
+│   │       ├── sse.js                 # SSE 事件解析
+│   │       └── markdown.js            # Markdown 渲染
+│   │
+│   └── tests/                         # 前端测试（vitest + @vue/test-utils）
+│       ├── setup.js                   # 全局 Mock & 配置
+│       ├── LoginPage.test.js          # 登录页组件测试
+│       └── AppLayout.test.js          # 布局组件测试
 ```
 
 ---

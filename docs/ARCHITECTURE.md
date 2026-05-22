@@ -2,7 +2,7 @@
 
 | 属性 | 值 |
 |:---|:---|
-| 文档版本 | v0.10 |
+| 文档版本 | v0.11 |
 | 最后更新 | 2026-05-21 |
 | 作者 | yuz |
 | 状态 | 草稿 |
@@ -30,14 +30,14 @@
 | 后端框架 | FastAPI | 异步 Python Web 框架，原生支持 SSE | [Implemented] |
 | AI 编排 | LangChain | RAG 链路编排，但不依赖其高级封装 | [Implemented] |
 | LLM | DeepSeek (OpenAI 兼容接口) | 支持 OpenAI / 通义千问 / DeepSeek 等互换 | [Implemented] |
-| Embedding | DashScope text-embedding-v3 | 1024 维向量，中文优化 | [Planned: Phase 2] |
+| Embedding | DashScope text-embedding-v3 | 1024 维向量，中文优化 | [Implemented] |
 | 向量数据库 | ChromaDB | 嵌入式运行，零配置，轻量级场景首选 | [Implemented] |
 | 关系数据库 | MySQL + aiomysql | 业务数据持久化 | [Implemented] |
 | 异步 ORM | SQLAlchemy 2.0 async | Mapped 类型注解 + async session | [Implemented] |
 | 缓存 | Redis | 会话缓存 + Celery broker | [Implemented] |
 | 异步入库 | Redis + Celery | 文档入库异步任务队列 | [Implemented] |
 | 文档解析 | PyPDF2 + python-docx | 多格式文档统一提取纯文本 | [Implemented] |
-| 智能分块 | RecursiveCharacterTextSplitter | 固定大小分块，分隔符优先级切分 | [Planned: Phase 2] |
+| 智能分块 | RecursiveCharacterTextSplitter | 固定大小分块，分隔符优先级切分 | [Implemented] |
 | 关键词检索 | rank-bm25 (BM25Okapi) + jieba 分词 | 成熟库，支持自定义 tokenizer（见 §7.2） | [Planned: Phase 3] |
 | 文件存储 | 本地磁盘（可扩展至 OSS） | 抽象 StorageBackend 接口，当前本地实现 | [Implemented] |
 | 流式输出 | SSE (Server-Sent Events) | 实时推送 LLM 生成内容 | [Planned: Phase 3] |
@@ -104,7 +104,7 @@
 │                                                              │
 │  ┌──────────────────────────────────────────────────────┐    │
 │  │              Celery Worker（异步入库）                  │    │
-│  │  Parser ✅ → Chunker ⬜ → Embedder ⬜ → Vector Store ⬜│    │
+│  │  Parser ✅ → Chunker ✅ → Embedder ✅ → Vector Store ✅│    │
 │  └──────────────────────────────────────────────────────┘    │
 │                                                              │
 │  ┌──────────┬─────────────┬──────────────┬────────────────┐  │
@@ -123,7 +123,7 @@
 | 业务痛点 | 对应模块 | 技术方案 | 效果 | 状态 |
 |:---|:---|:---|:---|:---|
 | 文档格式五花八门（PDF/Word/MD） | **文档解析** | PyPDF2 + python-docx | 统一提取纯文本 | [Implemented] |
-| 完整文档太长，无法直接检索 | **智能分块** | 固定大小分块，重叠窗口保留上下文 | 检索粒度精准，不丢上下文 | [Planned: Phase 2] |
+| 完整文档太长，无法直接检索 | **智能分块** | 固定大小分块，重叠窗口保留上下文 | 检索粒度精准，不丢上下文 | [Implemented] |
 | 大文件（100页PDF）上传后同步处理，用户等很久 | **异步入库** | Redis + Celery 异步任务 | 上传即返回，后台处理 | [Implemented] |
 | 关键词搜索"墨盒怎么换"找不到"打印机耗材更换" | **多路检索** | 向量检索（语义）+ BM25（关键词）+ RRF 融合 | 召回率大幅提升 | [Planned: Phase 3] |
 | 搜出来的结果排序不准 | **Rerank 重排序** | 当前 NoopReranker 占位，后续 DashScope Rerank 精排 | 相关文档排在前面 | [Planned: Phase 3] |
@@ -262,7 +262,7 @@ MySQL chunk_count 事务更新 + kb.chunk_count 同步更新
 
 ### 4.5 KB/文档异步删除
 
-> **[Implemented] 标记 deleting + 返回 202 已实现；[Planned: Phase 2] Celery Worker 异步清理 ChromaDB 向量 + 磁盘文件 + 物理 DELETE 待后续任务实现。**
+> **[Implemented] 标记 deleting + 返回 202 已实现；[Implemented] Celery Worker 异步清理 ChromaDB 向量 + 磁盘文件 + 物理 DELETE 已实现（delete_document / delete_kb 任务）。**
 
 **删除流程**：
 ```

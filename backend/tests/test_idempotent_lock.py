@@ -6,7 +6,6 @@ import pytest
 
 from app.ingest.lock import (
     IDEMPOTENCY_LOCK_TTL,
-    IDEMPOTENCY_KEY_PREFIX,
     _build_lock_key,
     acquire_idempotency_lock,
     check_idempotency_lock,
@@ -17,19 +16,20 @@ from app.ingest.lock import (
 class TestBuildLockKey:
     """锁 Key 格式测试"""
 
-    def test_key_格式包含前缀_doc_id_和_task_type(self):
+    def test_key_格式包含前缀和_doc_id(self):
         key = _build_lock_key(123, "ingest")
-        assert key == "idempotency_key:123:ingest"
+        assert key == "doc_lock:123"
 
     def test_key_不同_doc_id_生成不同_key(self):
         key1 = _build_lock_key(1, "ingest")
         key2 = _build_lock_key(2, "ingest")
         assert key1 != key2
 
-    def test_key_不同_task_type_生成不同_key(self):
+    def test_key_ingest和delete_共享同一锁(self):
+        """同一 doc_id 的 ingest/delete 使用相同锁键，确保互斥"""
         key1 = _build_lock_key(1, "ingest")
         key2 = _build_lock_key(1, "delete")
-        assert key1 != key2
+        assert key1 == key2
 
 
 class TestAcquireIdempotencyLock:
@@ -51,7 +51,7 @@ class TestAcquireIdempotencyLock:
             acquire_idempotency_lock(5, "ingest")
 
         mock_redis.set.assert_called_once_with(
-            "idempotency_key:5:ingest", "locked", ex=600, nx=True
+            "doc_lock:5", "locked", ex=600, nx=True
         )
 
     def test_获取成功_自定义_TTL(self):
@@ -62,7 +62,7 @@ class TestAcquireIdempotencyLock:
             acquire_idempotency_lock(1, "ingest", ttl=300)
 
         mock_redis.set.assert_called_once_with(
-            "idempotency_key:1:ingest", "locked", ex=300, nx=True
+            "doc_lock:1", "locked", ex=300, nx=True
         )
 
     def test_锁已存在_返回_False(self):
@@ -74,7 +74,8 @@ class TestAcquireIdempotencyLock:
             result = acquire_idempotency_lock(1, "ingest")
             assert result is False
 
-    def test_delete_任务类型_不同锁隔离(self):
+    def test_delete_和_ingest_共享互斥锁(self):
+        """ingest/delete 对同一 doc_id 使用相同锁键，确保互斥"""
         mock_redis = MagicMock()
         mock_redis.set.return_value = True
 
@@ -82,7 +83,7 @@ class TestAcquireIdempotencyLock:
             acquire_idempotency_lock(1, "delete")
 
         mock_redis.set.assert_called_once_with(
-            "idempotency_key:1:delete", "locked", ex=600, nx=True
+            "doc_lock:1", "locked", ex=600, nx=True
         )
 
 
@@ -95,7 +96,7 @@ class TestReleaseIdempotencyLock:
         with patch("app.ingest.lock.get_redis", return_value=mock_redis):
             release_idempotency_lock(1, "ingest")
 
-        mock_redis.delete.assert_called_once_with("idempotency_key:1:ingest")
+        mock_redis.delete.assert_called_once_with("doc_lock:1")
 
     def test_释放_不存在的_key_幂等无异常(self):
         """DELETE 对不存在的 key 不会抛异常"""
@@ -141,7 +142,7 @@ class TestCheckIdempotencyLock:
         with patch("app.ingest.lock.get_redis", return_value=mock_redis):
             check_idempotency_lock(42, "ingest")
 
-        mock_redis.exists.assert_called_once_with("idempotency_key:42:ingest")
+        mock_redis.exists.assert_called_once_with("doc_lock:42")
 
 
 class TestLockLifecycle:
@@ -162,7 +163,7 @@ class TestLockLifecycle:
 
             # 释放锁
             release_idempotency_lock(1, "ingest")
-            mock_redis.delete.assert_called_with("idempotency_key:1:ingest")
+            mock_redis.delete.assert_called_with("doc_lock:1")
 
             # 检查锁已不存在
             mock_redis.exists.return_value = 0

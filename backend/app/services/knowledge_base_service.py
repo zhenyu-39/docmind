@@ -9,6 +9,7 @@ from app.core.exceptions import (
     KnowledgeBaseNotFoundException,
     PermissionDeniedException,
 )
+from app.ingest.tasks import delete_kb as delete_kb_task
 from app.models.knowledge_base import KnowledgeBase
 from app.schemas.knowledge_base import (
     KnowledgeBaseCreate,
@@ -109,6 +110,10 @@ async def delete_kb(
     kb.status = "deleting"
     await db.flush()
     await db.refresh(kb)
+
+    # 分发 Celery 异步删除任务
+    delete_kb_task.delay(kb.id)
+
     return KnowledgeBaseDeleteResponse(kb_id=kb.id, status=kb.status)
 
 

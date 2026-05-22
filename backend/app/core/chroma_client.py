@@ -27,14 +27,16 @@ def init_chroma() -> Collection:
 
 
 def get_collection() -> Collection:
-    """获取 docmind collection。未初始化时抛异常。"""
+    """获取 docmind collection。未初始化时自动初始化。"""
+    global _collection, _client
     if _collection is None:
-        raise RuntimeError("ChromaDB 未初始化，请先调用 init_chroma()")
+        init_chroma()
     return _collection
 
 
 def get_client() -> ClientAPI:
-    """获取 ChromaDB PersistentClient。未初始化时抛异常。"""
+    """获取 ChromaDB PersistentClient。未初始化时自动初始化。"""
+    global _client, _collection
     if _client is None:
-        raise RuntimeError("ChromaDB 未初始化，请先调用 init_chroma()")
+        init_chroma()
     return _client

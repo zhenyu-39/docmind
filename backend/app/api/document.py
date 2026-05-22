@@ -33,7 +33,7 @@ async def batch_upload(
     )
     return {"code": "0", "message": "批量上传完成", "data": data.model_dump()}
 
-
+#
 @router.post("/{kb_id}/documents", status_code=201)
 async def upload(
     kb_id: int,
@@ -110,7 +110,7 @@ async def get_chunks(
     )
     return {"code": "0", "message": "ok", "data": data.model_dump()}
 
-
+#
 @router.post("/{kb_id}/documents/{doc_id}/reprocess")
 async def reprocess(
     kb_id: int,
@@ -124,7 +124,7 @@ async def reprocess(
     )
     return {"code": "0", "message": "重新处理任务已提交", "data": data.model_dump()}
 
-
+#
 @router.delete("/{kb_id}/documents/{doc_id}", status_code=202)
 async def delete_doc(
     kb_id: int,

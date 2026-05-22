@@ -1,5 +1,8 @@
 """文档业务逻辑 — 上传/批量上传/列表/详情/分块/删除/重新处理"""
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from typing import Any
 
 from fastapi import UploadFile
@@ -7,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.chroma_client import get_collection
 from app.core.exceptions import (
     DocumentNameExistsException,
     DocumentNotFoundException,
@@ -34,7 +38,8 @@ from app.schemas.document import (
     DocumentResponse,
     DocumentUploadResponse,
 )
-from app.ingest.tasks import delete_document, ingest_document
+from app.ingest.tasks import delete_document as _delete_doc_task
+from app.ingest.tasks import ingest_document as _ingest_doc_task
 from app.services.knowledge_base_service import check_kb_active
 
 # 允许的文件类型
@@ -115,9 +120,11 @@ async def upload_document(
                 raise DocumentNameExistsException(
                     f"文档 '{filename}' 已存在（kb_id={kb_id}），使用 force=true 可覆盖"
                 )
-            # force 覆盖：标记旧文档 deleting → 后续 Celery 异步清理
+            # force 覆盖：标记旧文档 deleting → 触发 Celery 异步清理
             existing.status = DocumentStatus.DELETING
             await db.flush()
+            await db.commit()  # 必须在 delay 前提交，否则 Worker 看不到 DELETING 状态
+            _delete_doc_task.delay(existing.id)
 
     # 创建文档记录
     doc = Document(
@@ -135,12 +142,13 @@ async def upload_document(
         doc.file_path = file_path
         doc.file_size = Path(file_path).stat().st_size
         await db.flush()
+        await db.commit()  # 必须在 delay 前提交，否则 Worker 看不到新记录
         await db.refresh(doc)
     except Exception:
         raise StorageErrorException(f"文件保存失败：{filename}")
 
     # 分发 Celery 入库任务
-    ingest_document.delay(doc.id)
+    _ingest_doc_task.delay(doc.id)
 
     return DocumentUploadResponse.model_validate(doc)
 
@@ -333,10 +341,11 @@ async def delete_document(
 
     doc.status = DocumentStatus.DELETING
     await db.flush()
+    await db.commit()  # 必须在 delay 前提交，否则 Worker 看不到 DELETING 状态
     await db.refresh(doc)
 
     # 分发 Celery 异步删除任务
-    delete_document.delay(doc.id)
+    _delete_doc_task.delay(doc.id)
 
     return DocumentDeleteResponse(doc_id=doc.id, status=doc.status)
 
@@ -357,15 +366,24 @@ async def reprocess_document(
             f"文档 {doc_id} 当前状态为 {doc.status}，仅 partial_failed/failed 状态允许重新处理"
         )
 
+    # 清理 ChromaDB 旧向量（新文档分块数可能少于旧文档，残留向量需清除）
+    try:
+        collection = get_collection()
+        collection.delete(where={"doc_id": doc_id})
+        logger.info("文档 %d reprocess 前 ChromaDB 旧向量已清理", doc_id)
+    except Exception:
+        logger.exception("文档 %d reprocess 前 ChromaDB 旧向量清理失败", doc_id)
+
     # 清理旧 chunk 记录（MySQL FK CASCADE 自动删除）并重置状态
     doc.status = DocumentStatus.UPLOADED
     doc.error_msg = None
     doc.current_stage = None
     doc.last_success_batch = 0
     await db.flush()
+    await db.commit()  # 必须在 delay 前提交，否则 Worker 看不到状态变更
     await db.refresh(doc)
 
     # 分发 Celery 入库任务（重新处理）
-    ingest_document.delay(doc.id)
+    _ingest_doc_task.delay(doc.id)
 
     return DocumentReprocessResponse(doc_id=doc.id, status=doc.status)

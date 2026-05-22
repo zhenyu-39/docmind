@@ -1,6 +1,6 @@
 """Celery 幂等锁 — 基于 Redis SET NX 实现，防止同一文档重复入队
 
-幂等键格式: idempotency_key:{doc_id}:{task_type}
+幂等键格式: doc_lock:{doc_id}（ingest/delete 共享互斥锁）
 锁 TTL: 600s（与 Celery soft_time_limit 对齐）
 
 触发规则（对齐 ARCHITECTURE.md §4.5）:
@@ -15,12 +15,12 @@ from app.core.redis_client import get_redis
 # 锁默认 TTL（秒），与 Celery soft_time_limit 对齐
 IDEMPOTENCY_LOCK_TTL = 600
 # 幂等键前缀
-IDEMPOTENCY_KEY_PREFIX = "idempotency_key"
+IDEMPOTENCY_KEY_PREFIX = "doc_lock"
 
 
 def _build_lock_key(doc_id: int, task_type: str) -> str:
-    """构建幂等锁 Redis key"""
-    return f"{IDEMPOTENCY_KEY_PREFIX}:{doc_id}:{task_type}"
+    """构建幂等锁 Redis key（ingest/delete 共享同一锁，确保互斥）"""
+    return f"{IDEMPOTENCY_KEY_PREFIX}:{doc_id}"
 
 
 def acquire_idempotency_lock(

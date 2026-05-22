@@ -95,6 +95,12 @@ def _parse_embed_response(data: dict, text_count: int) -> EmbedResult:
                 f"DashScope API 返回格式异常: 第 {item.get('text_index', '?')} 条缺少 embedding 字段"
             )
         embeddings.append(item["embedding"])
+
+    if len(embeddings) != text_count:
+        raise ValueError(
+            f"Embedding 数量不匹配: 期望 {text_count}, 实际 {len(embeddings)}"
+        )
+
     total_tokens = usage.get("total_tokens", 0)
 
     # API 仅返回总量不返回每条，按等比例分配

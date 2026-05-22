@@ -1,5 +1,37 @@
 # DocMind 变更日志
 
+## 2026-05-22 — Windows Celery Worker 启动修复
+
+### 修复
+- **Celery Worker 任务接收后卡死**（`celery_app.py`）：移除 `eventlet` 池配置，改用 `solo` 池。eventlet monkey-patch 与 asyncio 事件循环冲突，导致任务收到后静默,另外注意 --pool=solo 一次只处理一个任务，本地开发够用。如果后续需要并发，Windows 上可以起多个 Worker 进程。
+- **aiomysql 在 Worker 中静默卡死**（`celery_app.py`）：Windows 平台新增 `asyncio.set_event_loop_policy(WindowsSelectorEventLoopPolicy())`，aiomysql 依赖 Selector 事件循环，Windows 默认 Proactor 不兼容
+- **Celery Worker 中 ChromaDB 未初始化**（`chroma_client.py`）：`get_collection()` / `get_client()` 改为懒加载自动初始化，原实现仅依赖 FastAPI lifespan 调用 `init_chroma()`，Worker 独立进程未覆盖
+- **Service 层与 Celery 任务命名冲突**（`document_service.py`）：`delete_document` / `ingest_document` 导入加别名 `as _delete_doc_task` / `as _ingest_doc_task`，避免 service 同名函数覆盖 Celery task 导致 `.delay()` 抛出 AttributeError
+- **Celery 任务跨事件循环连接池报错**（`tasks.py`）：新增 `_get_worker_loop()` 持久化事件循环，`ingest_document` / `delete_document` / `delete_kb` 三个任务入口复用同一 loop。原每次任务 `new_event_loop()` → `close()` 导致 SQLAlchemy 连接池中连接挂在旧 loop 上，下个任务在新 loop 复用时触发 `attached to a different loop`
+- **Celery 任务在 commit 前被消费导致状态不一致**（`document_service.py`）：`upload_document` / `delete_document` / `reprocess_document` / force 覆盖路径 — 所有 `delay()` 分发前加 `await db.commit()`。原仅 `flush()` 后分发，`get_db()` 依赖注入在路由返回后才 commit，Worker 在 commit 前捡到任务时查到的仍是旧状态（如 delete 任务看到 completed 而非 deleting → 跳过删除 → 文档永久卡在 deleting）
+- **SQLAlchemy passive_deletes 导致删除文档报 IntegrityError**（`document.py` / `knowledge_base.py`）：`Document.chunks`、`KnowledgeBase.documents`、`KnowledgeBase.chunks` 三处 `relationship()` 添加 `passive_deletes=True`。SQLAlchemy 默认 `passive_deletes=False`，删除父对象前会先加载子对象并 SET FK=NULL 再让数据库 CASCADE 删除，但 chunk 的 `doc_id`/`kb_id` 为 NOT NULL，SET NULL 触发 `(1048, "Column 'doc_id' cannot be null")`。加 `passive_deletes=True` 跳过中间步骤，直接由数据库 FK CASCADE 处理
+
+## 2026-05-21 — 审查报告 10 项质量修复
+
+### 修复
+- **force 覆盖未触发 Celery 删除**（`document_service.py`）：`upload_document` force=true 覆盖终态文档时，新增 `delete_document.delay(existing.id)` 触发异步清理，确保旧文档向量/文件/MySQL 记录被清理
+- **delete_document 未递减 KB 统计计数**（`tasks.py`）：`_delete_document_async` 物理删除文档后，原子递减 `KnowledgeBase.chunk_count`/`doc_count`（使用 `func.greatest(0, ...)` 防止负数）
+- **KB 删除未触发 Celery 异步清理**（`tasks.py` + `knowledge_base_service.py`）：新增 `_delete_kb_async` / `delete_kb` Celery 任务，遍历 KB 下所有文档清理 ChromaDB + 磁盘 → 物理 DELETE KB；`delete_kb` service 层触发 `delete_kb_task.delay(kb.id)`
+- **reprocess 时 ChromaDB 旧向量清理缺失**（`document_service.py`）：`reprocess_document` 在重置状态前显式调用 `collection.delete(where={"doc_id": doc_id})` 清理旧向量
+- **Celery max_retries=3 死代码**（`tasks.py`）：移除 `_ingest_document_async` / `_delete_document_async` 外层 catch-all `except Exception`，添加 `autoretry_for=(Exception,)` + `retry_backoff=True`，未捕获异常由 Celery 自动重试
+- **vector_storing 恢复吞噬 ChromaDB 清理失败**（`tasks.py`）：ChromaDB 残留向量清理失败时标记 `DocumentStatus.FAILED` 并返回，不再静默继续
+- **Embedder 未校验 API 返回向量数**（`embedder.py`）：`_parse_embed_response` 新增 `len(embeddings) != text_count` 校验，不匹配时抛 `ValueError`
+- **入库/删除任务无互斥锁**（`lock.py` + `test_idempotent_lock.py`）：锁键格式从 `idempotency_key:{doc_id}:{task_type}` 改为 `doc_lock:{doc_id}`，ingest/delete 对同一 doc_id 共享互斥锁
+
+### 修改
+- `docs/ARCHITECTURE.md` — v0.10→v0.11；§1 技术选型 Embedding/智能分块 改为 `[Implemented]`；§2.2 实现图 Chunker/Embedder/Vector Store 改为 ✅；§4.5 异步删除改为 `[Implemented]`
+- `docs/TEST_CASES.md` — v0.14→v0.15；U6.7 更新为覆盖 `test_tasks.py`
+- `backend/tests/test_tasks.py` — 新增 11 用例：`RESUMABLE_STAGES` 阶段常量(5) + 断点恢复(3) + checkpoint 更新(1) + 幂等锁集成(1) + last_success_batch(1)
+- `backend/tests/test_idempotent_lock.py` — 锁键格式更新：`doc_lock:{doc_id}`；shared lock for ingest/delete
+
+### 测试结果
+- 后端：304/304 全部通过（零回归，+11 新用例）
+
 ## 2026-05-21 — delete_document Celery 异步任务实现
 
 ### 修改

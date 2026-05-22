@@ -1,8 +1,17 @@
 """Celery 应用配置 — broker/backend 从 settings 读取"""
 
-from celery import Celery
+import asyncio
+import sys
 
+from celery import Celery
+from app.core.chroma_client import init_chroma
 from app.config import settings
+# Worker 启动时初始化 ChromaDB（独立进程，不走 FastAPI lifespan）
+from celery.signals import worker_process_init
+
+# Windows 下 aiomysql 需要 SelectorEventLoop，Proactor 会卡死
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 celery_app = Celery(
     "docmind",
@@ -21,6 +30,18 @@ celery_app.conf.update(
     task_soft_time_limit=600,
     task_time_limit=900,
 )
+
+# Windows: solo 池（默认），避免 eventlet/gevent 与 asyncio 冲突
+if sys.platform == "win32":
+    celery_app.conf.update(
+        worker_pool="solo",
+    )
+
+
+@worker_process_init.connect
+def _init_worker_resources(**kwargs):
+    init_chroma()
+
 
 # 注册任务模块（导入即注册 @celery_app.task 装饰的任务）
 import app.ingest.tasks  # noqa: E402, F401
