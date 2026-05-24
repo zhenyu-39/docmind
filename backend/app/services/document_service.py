@@ -67,12 +67,21 @@ def _validate_file(file: UploadFile) -> None:
 
 
 async def _check_kb_ownership(
-    db: AsyncSession, kb_id: int, user_id: int, role: str
+    db: AsyncSession, kb_id: int, user_id: int, role: str,
+    *,
+    owner_only: bool = False,
 ) -> None:
-    """校验知识库存在且 active，且当前用户有操作权限"""
+    """校验知识库存在且 active，且当前用户有操作权限
+
+    owner_only=True 时仅 owner 可操作（admin 也不允许），用于上传/reprocess 等写操作
+    """
     kb = await check_kb_active(db, kb_id)
-    if kb.user_id != user_id and role != "admin":
-        raise PermissionDeniedException()
+    if owner_only:
+        if kb.user_id != user_id:
+            raise PermissionDeniedException()
+    else:
+        if kb.user_id != user_id and role != "admin":
+            raise PermissionDeniedException()
 
 
 def _build_document_response(doc: Document) -> DocumentResponse:
@@ -89,7 +98,7 @@ async def upload_document(
 ) -> DocumentUploadResponse:
     """上传单个文档，支持 force 覆盖模式"""
     _validate_file(file)
-    await _check_kb_ownership(db, kb_id, user_id, role)
+    await _check_kb_ownership(db, kb_id, user_id, role, owner_only=True)
 
     filename = file.filename
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
@@ -162,7 +171,7 @@ async def batch_upload_documents(
     files: list[UploadFile],
 ) -> DocumentBatchUploadResponse:
     """批量上传文档，部分成功返回"""
-    await _check_kb_ownership(db, kb_id, user_id, role)
+    await _check_kb_ownership(db, kb_id, user_id, role, owner_only=True)
 
     success: list[DocumentBatchUploadItem] = []
     failed: list[DocumentBatchUploadFailedItem] = []
@@ -361,7 +370,7 @@ async def reprocess_document(
     role: str,
 ) -> DocumentReprocessResponse:
     """重新处理失败或部分失败的文档（仅 partial_failed / failed 允许）"""
-    await _check_kb_ownership(db, kb_id, user_id, role)
+    await _check_kb_ownership(db, kb_id, user_id, role, owner_only=True)
     doc = await _get_doc_in_kb(db, kb_id, doc_id)
 
     if doc.status not in (DocumentStatus.PARTIAL_FAILED, DocumentStatus.FAILED):

@@ -264,10 +264,10 @@ class TestUploadDocument:
         assert response.json()["code"] == "E5004"
 
     @pytest.mark.asyncio
-    async def test_upload_admin_can_access(self, async_client, admin_auth_headers):
-        """admin 可上传到非自己创建的知识库"""
+    async def test_upload_admin_denied(self, async_client, admin_auth_headers):
+        """admin 不能上传到非自己创建的知识库（上传仅 owner）"""
         with patch("app.api.document.upload_document", new_callable=AsyncMock) as mock:
-            mock.return_value = _make_upload_response(filename="admin_doc.pdf")
+            mock.side_effect = PermissionDeniedException()
 
             response = await async_client.post(
                 "/api/knowledge-bases/1/documents",
@@ -275,7 +275,8 @@ class TestUploadDocument:
                 headers=admin_auth_headers,
             )
 
-        assert response.status_code == 201
+        assert response.status_code == 403
+        assert response.json()["code"] == "E5005"
 
     @pytest.mark.asyncio
     async def test_upload_md_and_txt_accepted(self, async_client, auth_headers):
@@ -324,7 +325,7 @@ class TestBatchUploadDocuments:
         assert response.status_code == 200
         body = response.json()
         assert body["code"] == "0"
-        assert body["message"] == "批量上传完成"
+        assert body["message"] == "批量上传完成（2 个文件，成功 2 个）"
         assert len(body["data"]["success"]) == 2
         assert len(body["data"]["failed"]) == 0
         assert body["data"]["success"][0]["filename"] == "a.pdf"
@@ -868,3 +869,265 @@ class TestDeleteDocument:
         """未登录"""
         response = await async_client.delete("/api/knowledge-bases/1/documents/5")
         assert response.status_code == 401
+
+
+# ==================== Phase 2.5 文档接口权限矩阵 ====================
+
+
+class TestDocumentPermissionMatrix:
+    """文档接口权限验证（ROADMAP §4.2 最后一项）
+
+    上传/reprocess 仅 owner（admin 不可）
+    查看/分块/删除 owner + admin
+    """
+
+    # --- 上传权限 ---
+
+    @pytest.mark.asyncio
+    async def test_owner_can_upload(self, async_client, auth_headers):
+        """owner 可上传文档"""
+        with patch("app.api.document.upload_document", new_callable=AsyncMock) as mock:
+            mock.return_value = _make_upload_response(filename="owner_doc.pdf")
+
+            response = await async_client.post(
+                "/api/knowledge-bases/1/documents",
+                files={"file": ("owner_doc.pdf", b"content", "application/pdf")},
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 201
+
+    @pytest.mark.asyncio
+    async def test_admin_cannot_upload(self, async_client, admin_auth_headers):
+        """admin 不能上传到他人知识库（上传仅 owner）"""
+        with patch("app.api.document.upload_document", new_callable=AsyncMock) as mock:
+            mock.side_effect = PermissionDeniedException()
+
+            response = await async_client.post(
+                "/api/knowledge-bases/1/documents",
+                files={"file": ("admin_doc.pdf", b"content", "application/pdf")},
+                headers=admin_auth_headers,
+            )
+
+        assert response.status_code == 403
+        assert response.json()["code"] == "E5005"
+
+    @pytest.mark.asyncio
+    async def test_other_user_cannot_upload(self, async_client, other_user_auth_headers):
+        """非 owner 普通用户不能上传"""
+        with patch("app.api.document.upload_document", new_callable=AsyncMock) as mock:
+            mock.side_effect = PermissionDeniedException()
+
+            response = await async_client.post(
+                "/api/knowledge-bases/1/documents",
+                files={"file": ("test.pdf", b"content", "application/pdf")},
+                headers=other_user_auth_headers,
+            )
+
+        assert response.status_code == 403
+
+    # --- 列表权限 ---
+
+    @pytest.mark.asyncio
+    async def test_owner_can_list(self, async_client, auth_headers):
+        """owner 可查看文档列表"""
+        with patch("app.api.document.list_documents", new_callable=AsyncMock) as mock:
+            mock.return_value = _make_list_data()
+
+            response = await async_client.get(
+                "/api/knowledge-bases/1/documents",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_admin_can_list(self, async_client, admin_auth_headers):
+        """admin 可查看任意 KB 文档列表（private KB 审计）"""
+        with patch("app.api.document.list_documents", new_callable=AsyncMock) as mock:
+            mock.return_value = _make_list_data()
+
+            response = await async_client.get(
+                "/api/knowledge-bases/1/documents",
+                headers=admin_auth_headers,
+            )
+
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_other_user_cannot_list(self, async_client, other_user_auth_headers):
+        """非 owner 普通用户不能查看他人 private KB 文档列表"""
+        with patch("app.api.document.list_documents", new_callable=AsyncMock) as mock:
+            mock.side_effect = PermissionDeniedException()
+
+            response = await async_client.get(
+                "/api/knowledge-bases/1/documents",
+                headers=other_user_auth_headers,
+            )
+
+        assert response.status_code == 403
+
+    # --- 详情权限 ---
+
+    @pytest.mark.asyncio
+    async def test_owner_can_get(self, async_client, auth_headers):
+        """owner 可查看文档详情"""
+        with patch("app.api.document.get_document", new_callable=AsyncMock) as mock:
+            mock.return_value = _make_doc_response()
+
+            response = await async_client.get(
+                "/api/knowledge-bases/1/documents/1",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_admin_can_get(self, async_client, admin_auth_headers):
+        """admin 可查看任意 KB 文档详情（private KB 审计）"""
+        with patch("app.api.document.get_document", new_callable=AsyncMock) as mock:
+            mock.return_value = _make_doc_response()
+
+            response = await async_client.get(
+                "/api/knowledge-bases/1/documents/1",
+                headers=admin_auth_headers,
+            )
+
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_other_user_cannot_get(self, async_client, other_user_auth_headers):
+        """非 owner 普通用户不能查看他人 private KB 文档详情"""
+        with patch("app.api.document.get_document", new_callable=AsyncMock) as mock:
+            mock.side_effect = PermissionDeniedException()
+
+            response = await async_client.get(
+                "/api/knowledge-bases/1/documents/1",
+                headers=other_user_auth_headers,
+            )
+
+        assert response.status_code == 403
+
+    # --- 分块权限 ---
+
+    @pytest.mark.asyncio
+    async def test_owner_can_get_chunks(self, async_client, auth_headers):
+        """owner 可查看文档分块"""
+        with patch("app.api.document.get_document_chunks", new_callable=AsyncMock) as mock:
+            mock.return_value = _make_chunk_list_data()
+
+            response = await async_client.get(
+                "/api/knowledge-bases/1/documents/1/chunks",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_admin_can_get_chunks(self, async_client, admin_auth_headers):
+        """admin 可查看任意 KB 文档分块（private KB 审计）"""
+        with patch("app.api.document.get_document_chunks", new_callable=AsyncMock) as mock:
+            mock.return_value = _make_chunk_list_data()
+
+            response = await async_client.get(
+                "/api/knowledge-bases/1/documents/1/chunks",
+                headers=admin_auth_headers,
+            )
+
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_other_user_cannot_get_chunks(self, async_client, other_user_auth_headers):
+        """非 owner 普通用户不能查看他人 private KB 文档分块"""
+        with patch("app.api.document.get_document_chunks", new_callable=AsyncMock) as mock:
+            mock.side_effect = PermissionDeniedException()
+
+            response = await async_client.get(
+                "/api/knowledge-bases/1/documents/1/chunks",
+                headers=other_user_auth_headers,
+            )
+
+        assert response.status_code == 403
+
+    # --- 删除权限 ---
+
+    @pytest.mark.asyncio
+    async def test_owner_can_delete(self, async_client, auth_headers):
+        """owner 可删除文档"""
+        with patch("app.api.document.delete_document", new_callable=AsyncMock) as mock:
+            mock.return_value = _make_delete_data()
+
+            response = await async_client.delete(
+                "/api/knowledge-bases/1/documents/1",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 202
+
+    @pytest.mark.asyncio
+    async def test_admin_can_delete(self, async_client, admin_auth_headers):
+        """admin 可删除任意 KB 文档（违规清理）"""
+        with patch("app.api.document.delete_document", new_callable=AsyncMock) as mock:
+            mock.return_value = _make_delete_data()
+
+            response = await async_client.delete(
+                "/api/knowledge-bases/1/documents/1",
+                headers=admin_auth_headers,
+            )
+
+        assert response.status_code == 202
+
+    @pytest.mark.asyncio
+    async def test_other_user_cannot_delete(self, async_client, other_user_auth_headers):
+        """非 owner 普通用户不能删除他人文档"""
+        with patch("app.api.document.delete_document", new_callable=AsyncMock) as mock:
+            mock.side_effect = PermissionDeniedException()
+
+            response = await async_client.delete(
+                "/api/knowledge-bases/1/documents/1",
+                headers=other_user_auth_headers,
+            )
+
+        assert response.status_code == 403
+
+    # --- reprocess 权限 ---
+
+    @pytest.mark.asyncio
+    async def test_owner_can_reprocess(self, async_client, auth_headers):
+        """owner 可重新处理文档"""
+        with patch("app.api.document.reprocess_document", new_callable=AsyncMock) as mock:
+            mock.return_value = _make_reprocess_data()
+
+            response = await async_client.post(
+                "/api/knowledge-bases/1/documents/1/reprocess",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_admin_cannot_reprocess(self, async_client, admin_auth_headers):
+        """admin 不能重新处理他人文档（reprocess 仅 owner）"""
+        with patch("app.api.document.reprocess_document", new_callable=AsyncMock) as mock:
+            mock.side_effect = PermissionDeniedException()
+
+            response = await async_client.post(
+                "/api/knowledge-bases/1/documents/1/reprocess",
+                headers=admin_auth_headers,
+            )
+
+        assert response.status_code == 403
+        assert response.json()["code"] == "E5005"
+
+    @pytest.mark.asyncio
+    async def test_other_user_cannot_reprocess(self, async_client, other_user_auth_headers):
+        """非 owner 普通用户不能重新处理他人文档"""
+        with patch("app.api.document.reprocess_document", new_callable=AsyncMock) as mock:
+            mock.side_effect = PermissionDeniedException()
+
+            response = await async_client.post(
+                "/api/knowledge-bases/1/documents/1/reprocess",
+                headers=other_user_auth_headers,
+            )
+
+        assert response.status_code == 403

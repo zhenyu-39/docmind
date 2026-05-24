@@ -7,6 +7,8 @@ from .knowledge_base import (  # noqa: F401
     KnowledgeBaseResponse,
     KnowledgeBaseListResponse,
     KnowledgeBaseDeleteResponse,
+    PublicKnowledgeBaseResponse,
+    PublicKnowledgeBaseListResponse,
 )
 from .document import (  # noqa: F401
     DocumentResponse,

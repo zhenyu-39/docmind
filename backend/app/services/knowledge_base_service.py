@@ -11,12 +11,15 @@ from app.core.exceptions import (
 )
 from app.ingest.tasks import delete_kb as delete_kb_task
 from app.models.knowledge_base import KnowledgeBase
+from app.models.user import User
 from app.schemas.knowledge_base import (
     KnowledgeBaseCreate,
     KnowledgeBaseDeleteResponse,
     KnowledgeBaseListResponse,
     KnowledgeBaseResponse,
     KnowledgeBaseUpdate,
+    PublicKnowledgeBaseListResponse,
+    PublicKnowledgeBaseResponse,
 )
 
 
@@ -28,6 +31,7 @@ async def create_kb(
         user_id=user_id,
         name=data.name,
         description=data.description,
+        visibility=data.visibility,
     )
     db.add(kb)
     try:
@@ -42,14 +46,18 @@ async def get_kb(
     db: AsyncSession, kb_id: int, user_id: int | None = None, role: str | None = None
 ) -> KnowledgeBase:
     """获取知识库，不存在时抛出 KnowledgeBaseNotFoundException。
-    传入 user_id 时校验所有权：非 owner 且非 admin 抛出 PermissionDeniedException。
+
+    权限规则（visibility 优先于 ownership）：
+    - public KB：所有登录用户可读
+    - private KB：仅 owner 或 admin 可读
     """
     result = await db.execute(select(KnowledgeBase).where(KnowledgeBase.id == kb_id))
     kb = result.scalar_one_or_none()
     if kb is None:
         raise KnowledgeBaseNotFoundException(kb_id)
-    if user_id is not None and kb.user_id != user_id and role != "admin":
-        raise PermissionDeniedException()
+    if user_id is not None:
+        if kb.visibility == "private" and kb.user_id != user_id and role != "admin":
+            raise PermissionDeniedException()
     return kb
 
 
@@ -75,10 +83,56 @@ async def list_kbs(
     return KnowledgeBaseListResponse(total=total, page=page, page_size=page_size, items=items)
 
 
+async def list_public_kbs(
+    db: AsyncSession, page: int = 1, page_size: int = 20
+) -> PublicKnowledgeBaseListResponse:
+    """获取所有公开知识库列表（分页），仅返回 status=active 且 visibility=public 的 KB"""
+    base_q = (
+        select(KnowledgeBase, User.username)
+        .join(User, KnowledgeBase.user_id == User.id)
+        .where(
+            KnowledgeBase.visibility == "public",
+            KnowledgeBase.status == "active",
+        )
+    )
+    # 总数
+    count_q = select(func.count()).select_from(base_q.subquery())
+    total = (await db.execute(count_q)).scalar()
+
+    # 分页数据
+    q = (
+        base_q
+        .order_by(KnowledgeBase.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    rows = (await db.execute(q)).all()
+    items = [
+        PublicKnowledgeBaseResponse(
+            id=kb.id,
+            name=kb.name,
+            description=kb.description,
+            user_id=kb.user_id,
+            username=username,
+            visibility=kb.visibility,
+            status=kb.status,
+            doc_count=kb.doc_count,
+            chunk_count=kb.chunk_count,
+            created_at=kb.created_at,
+            updated_at=kb.updated_at,
+        )
+        for kb, username in rows
+    ]
+
+    return PublicKnowledgeBaseListResponse(total=total, page=page, page_size=page_size, items=items)
+
+
 async def update_kb(
     db: AsyncSession, kb_id: int, user_id: int, role: str, data: KnowledgeBaseUpdate
 ) -> KnowledgeBaseResponse:
-    """更新知识库名称或描述"""
+    """更新知识库元数据（名称/描述/可见性）。
+    owner 可修改自己的 KB；admin 可修改任意 KB（含 visibility 修正）。
+    """
     kb = await get_kb(db, kb_id)
 
     if kb.user_id != user_id and role != "admin":
@@ -88,6 +142,8 @@ async def update_kb(
         kb.name = data.name
     if data.description is not None:
         kb.description = data.description
+    if data.visibility is not None:
+        kb.visibility = data.visibility
 
     try:
         await db.flush()

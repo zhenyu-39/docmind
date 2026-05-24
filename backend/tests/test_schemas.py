@@ -159,3 +159,96 @@ class TestDocumentResponse:
         data = resp.model_dump()
         assert data["status"] == "completed"
         assert isinstance(data["status"], str)
+
+
+class TestKnowledgeBaseCreateVisibility:
+    """KnowledgeBaseCreate visibility 字段校验（Phase 2.5）"""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        from app.schemas.knowledge_base import KnowledgeBaseCreate
+        self.KnowledgeBaseCreate = KnowledgeBaseCreate
+
+    def test_default_visibility_is_private(self):
+        """U9.1: 不传 visibility 时默认 "private" """
+        req = self.KnowledgeBaseCreate(name="测试知识库")
+        assert req.visibility == "private"
+
+    def test_explicit_private(self):
+        """U9.2: 显式传 visibility="private" 校验通过"""
+        req = self.KnowledgeBaseCreate(name="测试知识库", visibility="private")
+        assert req.visibility == "private"
+
+    def test_explicit_public(self):
+        """U9.3: 显式传 visibility="public" 校验通过"""
+        req = self.KnowledgeBaseCreate(name="测试知识库", visibility="public")
+        assert req.visibility == "public"
+
+    def test_invalid_visibility_rejected(self):
+        """U9.4: 无效 visibility 值抛出 ValidationError"""
+        with pytest.raises(ValidationError) as exc:
+            self.KnowledgeBaseCreate(name="测试知识库", visibility="invalid")
+        errors = exc.value.errors()
+        assert any("string_pattern_mismatch" == e.get("type", "") for e in errors)
+
+    def test_visibility_case_sensitive(self):
+        """visibility 严格区分大小写，'PUBLIC' 应被拒绝"""
+        with pytest.raises(ValidationError):
+            self.KnowledgeBaseCreate(name="测试知识库", visibility="PUBLIC")
+
+
+class TestKnowledgeBaseUpdateVisibility:
+    """KnowledgeBaseUpdate visibility 字段校验（Phase 2.5）"""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        from app.schemas.knowledge_base import KnowledgeBaseUpdate
+        self.KnowledgeBaseUpdate = KnowledgeBaseUpdate
+
+    def test_visibility_optional(self):
+        """U9.5: 不传 visibility 时为 None（部分更新）"""
+        req = self.KnowledgeBaseUpdate(name="新名称")
+        assert req.visibility is None
+        assert req.name == "新名称"
+
+    def test_set_visibility_public(self):
+        """U9.6: 更新 visibility="public" 校验通过"""
+        req = self.KnowledgeBaseUpdate(visibility="public")
+        assert req.visibility == "public"
+        assert req.name is None
+
+    def test_invalid_visibility_rejected(self):
+        """U9.7: 更新无效 visibility 值抛出 ValidationError"""
+        with pytest.raises(ValidationError) as exc:
+            self.KnowledgeBaseUpdate(visibility="invalid")
+        errors = exc.value.errors()
+        assert any("string_pattern_mismatch" == e.get("type", "") for e in errors)
+
+    def test_empty_update_body_allowed(self):
+        """全空 body 也允许（纯部分更新）"""
+        req = self.KnowledgeBaseUpdate()
+        assert req.name is None
+        assert req.description is None
+        assert req.visibility is None
+
+
+class TestKnowledgeBaseResponseVisibility:
+    """KnowledgeBaseResponse 含 visibility 字段（Phase 2.5）"""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        from app.schemas.knowledge_base import KnowledgeBaseResponse
+        self.KnowledgeBaseResponse = KnowledgeBaseResponse
+
+    def test_response_includes_visibility(self):
+        """U9.8: model_validate 含 visibility 成功"""
+        from datetime import datetime, timezone
+        resp = self.KnowledgeBaseResponse(
+            id=1, name="知识库", description="描述", user_id=1,
+            visibility="public", status="active", doc_count=0, chunk_count=0,
+            created_at=datetime.now(timezone.utc),
+        )
+        assert resp.visibility == "public"
+        data = resp.model_dump()
+        assert "visibility" in data
+        assert data["visibility"] == "public"

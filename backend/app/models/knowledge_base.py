@@ -19,6 +19,12 @@ class KnowledgeBase(Base):
     user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
+    visibility: Mapped[str] = mapped_column(
+        Enum("private", "public", name="kb_visibility"),
+        default="private",
+        server_default=text("'private'"),
+        comment="private（仅owner可见）/ public（所有用户可检索）"
+    )
     status: Mapped[str] = mapped_column(
         Enum("active", "deleting", name="kb_status"),
         default="active",

@@ -17,10 +17,10 @@ from app.schemas.knowledge_base import (
 
 
 def _make_kb_response(kb_id=1, name="测试知识库", description=None, user_id=1,
-                      status="active", doc_count=0, chunk_count=0):
+                      status="active", visibility="private", doc_count=0, chunk_count=0):
     return KnowledgeBaseResponse(
         id=kb_id, name=name, description=description, user_id=user_id,
-        status=status, doc_count=doc_count, chunk_count=chunk_count,
+        visibility=visibility, status=status, doc_count=doc_count, chunk_count=chunk_count,
         created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
     )
 
@@ -445,3 +445,206 @@ class TestDeleteKB:
     async def test_delete_no_auth(self, async_client):
         response = await async_client.delete("/api/knowledge-bases/1")
         assert response.status_code == 401
+
+
+class TestVisibilityPermissionMatrix:
+    """Phase 2.5 — KB 权限矩阵接口测试（A6.1-A6.6）"""
+
+    @pytest.mark.asyncio
+    async def test_public_kb_readable_by_other_user(self, async_client, other_user_auth_headers):
+        """A6.1: public KB 允许非 owner 读取"""
+        with patch("app.api.knowledge_base.get_kb", new_callable=AsyncMock) as mock:
+            mock.return_value = _make_kb_response(kb_id=2, user_id=99, visibility="public")
+
+            response = await async_client.get(
+                "/api/knowledge-bases/2",
+                headers=other_user_auth_headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["code"] == "0"
+        assert body["data"]["visibility"] == "public"
+        assert body["data"]["user_id"] == 99
+
+    @pytest.mark.asyncio
+    async def test_private_kb_denied_to_other_user(self, async_client, other_user_auth_headers):
+        """A6.2: private KB 非 owner 拒绝访问"""
+        with patch("app.api.knowledge_base.get_kb", new_callable=AsyncMock) as mock:
+            mock.side_effect = PermissionDeniedException()
+
+            response = await async_client.get(
+                "/api/knowledge-bases/2",
+                headers=other_user_auth_headers,
+            )
+
+        assert response.status_code == 403
+        assert response.json()["code"] == "E5005"
+
+    @pytest.mark.asyncio
+    async def test_public_kb_not_writable_by_other_user(self, async_client, other_user_auth_headers):
+        """A6.3: public KB 非 owner 不可修改（ownership 控制写）"""
+        with patch("app.api.knowledge_base.update_kb", new_callable=AsyncMock) as mock:
+            mock.side_effect = PermissionDeniedException()
+
+            response = await async_client.put(
+                "/api/knowledge-bases/2",
+                json={"visibility": "private"},
+                headers=other_user_auth_headers,
+            )
+
+        assert response.status_code == 403
+        assert response.json()["code"] == "E5005"
+
+    @pytest.mark.asyncio
+    async def test_admin_can_read_private_kb(self, async_client, admin_auth_headers):
+        """A6.4: admin 可查看他人 private KB（审计）"""
+        with patch("app.api.knowledge_base.get_kb", new_callable=AsyncMock) as mock:
+            mock.return_value = _make_kb_response(kb_id=2, user_id=99, visibility="private")
+
+            response = await async_client.get(
+                "/api/knowledge-bases/2",
+                headers=admin_auth_headers,
+            )
+
+        assert response.status_code == 200
+        assert response.json()["code"] == "0"
+
+    @pytest.mark.asyncio
+    async def test_admin_can_update_any_kb_visibility(self, async_client, admin_auth_headers):
+        """A6.5: admin 可修正任意 KB 的 visibility"""
+        with patch("app.api.knowledge_base.update_kb", new_callable=AsyncMock) as mock:
+            mock.return_value = _make_kb_response(kb_id=2, user_id=99, visibility="public")
+
+            response = await async_client.put(
+                "/api/knowledge-bases/2",
+                json={"visibility": "public"},
+                headers=admin_auth_headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["code"] == "0"
+        assert body["data"]["visibility"] == "public"
+
+    @pytest.mark.asyncio
+    async def test_owner_can_update_visibility(self, async_client, auth_headers):
+        """A6.6: owner 可将 private KB 改为 public"""
+        with patch("app.api.knowledge_base.update_kb", new_callable=AsyncMock) as mock:
+            mock.return_value = _make_kb_response(kb_id=1, user_id=1, visibility="public")
+
+            response = await async_client.put(
+                "/api/knowledge-bases/1",
+                json={"visibility": "public"},
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["code"] == "0"
+        assert body["data"]["visibility"] == "public"
+
+
+class TestPublicKbList:
+    """Phase 2.5 — 公共 KB 列表接口测试（A7.1-A7.7）"""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        from app.schemas.knowledge_base import PublicKnowledgeBaseListResponse, PublicKnowledgeBaseResponse
+        self.PublicKnowledgeBaseResponse = PublicKnowledgeBaseResponse
+        self.PublicKnowledgeBaseListResponse = PublicKnowledgeBaseListResponse
+
+    def _make_public_item(self, kb_id=2, name="公开知识库", username="zhangsan", user_id=3):
+        return self.PublicKnowledgeBaseResponse(
+            id=kb_id, name=name, description="公开描述", user_id=user_id,
+            username=username, visibility="public", status="active",
+            doc_count=5, chunk_count=100,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_public_kbs_success(self, async_client, auth_headers):
+        """A7.1: 返回 visibility=public 且 status=active 的 KB"""
+        items = [self._make_public_item(kb_id=2), self._make_public_item(kb_id=3, name="IT制度")]
+        with patch("app.api.knowledge_base.list_public_kbs", new_callable=AsyncMock) as mock:
+            mock.return_value = self.PublicKnowledgeBaseListResponse(
+                total=2, page=1, page_size=20, items=items,
+            )
+
+            response = await async_client.get(
+                "/api/knowledge-bases/public",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["code"] == "0"
+        assert body["data"]["total"] == 2
+        assert len(body["data"]["items"]) == 2
+        assert body["data"]["items"][0]["name"] == "公开知识库"
+        assert body["data"]["items"][0]["visibility"] == "public"
+        assert body["data"]["items"][0]["status"] == "active"
+
+    @pytest.mark.asyncio
+    async def test_list_public_includes_username(self, async_client, auth_headers):
+        """A7.5: items 含 owner 用户名"""
+        with patch("app.api.knowledge_base.list_public_kbs", new_callable=AsyncMock) as mock:
+            mock.return_value = self.PublicKnowledgeBaseListResponse(
+                total=1, page=1, page_size=20,
+                items=[self._make_public_item(username="zhangsan")],
+            )
+
+            response = await async_client.get(
+                "/api/knowledge-bases/public",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert "username" in data["items"][0]
+        assert data["items"][0]["username"] == "zhangsan"
+
+    @pytest.mark.asyncio
+    async def test_list_public_empty(self, async_client, auth_headers):
+        """A7.7: 无 public KB 时返回 total=0"""
+        with patch("app.api.knowledge_base.list_public_kbs", new_callable=AsyncMock) as mock:
+            mock.return_value = self.PublicKnowledgeBaseListResponse(
+                total=0, page=1, page_size=20, items=[],
+            )
+
+            response = await async_client.get(
+                "/api/knowledge-bases/public",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["data"]["total"] == 0
+        assert body["data"]["items"] == []
+
+    @pytest.mark.asyncio
+    async def test_list_public_pagination(self, async_client, auth_headers):
+        """A7.4: 分页参数正确传递"""
+        with patch("app.api.knowledge_base.list_public_kbs", new_callable=AsyncMock) as mock:
+            mock.return_value = self.PublicKnowledgeBaseListResponse(
+                total=10, page=2, page_size=5, items=[],
+            )
+
+            response = await async_client.get(
+                "/api/knowledge-bases/public?page=2&page_size=5",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["data"]["page"] == 2
+        assert body["data"]["page_size"] == 5
+        assert body["data"]["total"] == 10
+
+    @pytest.mark.asyncio
+    async def test_list_public_no_auth(self, async_client):
+        """A7.6: 未认证访问拒绝"""
+        response = await async_client.get("/api/knowledge-bases/public")
+        assert response.status_code == 401
+        assert response.json()["code"] == "E5004"

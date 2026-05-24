@@ -9,6 +9,7 @@ from app.services.knowledge_base_service import (
     create_kb,
     delete_kb,
     list_kbs,
+    list_public_kbs,
     get_kb,
     update_kb,
 )
@@ -39,13 +40,25 @@ async def list_knowledge_bases(
     return {"code": "0", "message": "ok", "data": data.model_dump()}
 
 
+@router.get("/public")
+async def list_public_knowledge_bases(
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """获取所有公开知识库列表（分页），跨用户"""
+    data = await list_public_kbs(db, page, page_size)
+    return {"code": "0", "message": "ok", "data": data.model_dump()}
+
+
 @router.get("/{kb_id}")
 async def get_knowledge_base(
     kb_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """获取知识库详情"""
+    """获取知识库详情。public KB 所有登录用户可查看，private KB 仅 owner 或 admin 可查看。"""
     kb = await get_kb(db, kb_id, current_user["user_id"], current_user["role"])
     return {"code": "0", "message": "ok", "data": KnowledgeBaseResponse.model_validate(kb).model_dump()}
 
@@ -57,7 +70,7 @@ async def update_knowledge_base(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """更新知识库名称或描述"""
+    """更新知识库元数据（名称/描述/可见性）。owner 可修改自己的 KB，admin 可修正任意 KB。"""
     kb = await update_kb(db, kb_id, current_user["user_id"], current_user["role"], req)
     return {"code": "0", "message": "知识库更新成功", "data": kb.model_dump()}
 
