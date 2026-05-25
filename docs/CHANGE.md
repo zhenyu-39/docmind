@@ -1,5 +1,17 @@
 # DocMind 变更日志
 
+## 2026-05-25 — 修复：上传文档后状态一直停在「解析中」
+
+### 修复
+
+| 文件 | 变更 |
+|:---|:---|
+| `frontend/src/views/KnowledgeDetail.vue` | `uploadFiles()` 在 `reloadDocList()` 后对非终态文档启动状态轮询，与 `loadPage()` 保持一致 |
+
+### 根因
+
+上传成功后只刷新了文档列表，没有 `startPolling()`，前端不会轮询状态变化。Celery 后台正常处理，但 UI 不更新。
+
 ## 2026-05-25 — 修复：知识库 doc_count 上传不递增 + deleting 状态文档无法重新上传
 
 ### 修复

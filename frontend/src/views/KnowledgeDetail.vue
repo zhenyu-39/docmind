@@ -459,8 +459,13 @@ async function uploadFiles(files) {
       if (existing) formData.append('force', 'true')
 
       await store.uploadDoc(kbId.value, formData)
-      // 上传成功后添加一行并开始轮询
       await reloadDocList()
+      // 对新上传的非终态文档启动状态轮询
+      store.docList.forEach(doc => {
+        if (!isTerminal(doc.status)) {
+          store.startPolling(kbId.value, doc.id)
+        }
+      })
       ElMessage.success(`"${file.name}" 上传成功`)
     } catch (err) {
       const msg = err.response?.data?.message || `"${file.name}" 上传失败`
