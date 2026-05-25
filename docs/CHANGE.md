@@ -1,5 +1,39 @@
 # DocMind 变更日志
 
+## 2026-05-25 — 修复：知识库 doc_count 上传不递增 + deleting 状态文档无法重新上传
+
+### 修复
+
+| 文件 | 变更 |
+|:---|:---|
+| `backend/app/services/document_service.py` | ① `upload_document` 创建文档记录后递增 `kb.doc_count += 1`；② `upload_document` 同名文档状态为 `deleting` 时复用旧记录（清 Chunk + 清 ChromaDB 向量 + 重置状态），不再拒绝上传；③ 新增 `delete` 导入 |
+
+### 根因
+
+1. `doc_count` 只在删除时递减 (`tasks.py:552`)，上传时从未递增
+2. `deleting` 状态和其他处理中状态一视同仁地被拒绝上传。但 `deleting` 语义是「用户已要求删除」，应允许立即重新上传。Celery 挂掉时用户会被彻底卡死：前端看不到该文档，后端又拒绝重新上传同名文件
+
+### 复用旧记录方案（deleting → uploaded）
+
+```
+同名文档存在 & status=deleting
+  → DELETE 旧 Chunk（MySQL），同步递减 kb.chunk_count
+  → DELETE 旧向量（ChromaDB），失败仅 logger.warning 不阻塞
+  → 重置 doc.status/error_msg/chunk_count/current_stage/last_success_batch
+  → 复用旧 doc_id 保存新文件 + 分发 Celery 入库任务
+  → doc_count 不递增（复用旧记录，计数不漂移）
+```
+
+### 注意事项
+
+`doc_count` 历史数据需通过 SQL 手动修正（见上条记录）。
+
+### 测试结果
+
+- 后端：343/343 全部通过
+
+---
+
 ## 2026-05-24 — 修复：KnowledgeDetail 编辑弹窗缺少可见性选项 + 非 owner 访问公开 KB 误报错
 
 ### 修复

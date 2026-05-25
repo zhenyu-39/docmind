@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 from typing import Any
 
 from fastapi import UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -26,6 +26,7 @@ from app.core.storage import local_storage
 from app.models.document import Document
 from app.models.chunk import Chunk
 from app.models.enums import DocumentStatus, is_terminal
+from app.models.knowledge_base import KnowledgeBase
 from app.schemas.document import (
     DocumentBatchUploadFailedItem,
     DocumentBatchUploadItem,
@@ -113,9 +114,42 @@ async def upload_document(
         )
     ).scalar_one_or_none()
 
+    doc = None  # None=新建文档；复用 deleting 记录时赋值为旧记录
+
     if existing is not None:
-        if not is_terminal(existing.status):
-            # 处理中（uploaded/parsing/chunking/embedding/vector_storing/deleting）
+        if existing.status == DocumentStatus.DELETING:
+            # 复用旧记录：清残留 → 重置状态 → 重新进入处理流程
+            doc = existing
+
+            # 清理旧 Chunk 记录并同步递减 kb.chunk_count
+            chunk_result = await db.execute(
+                select(func.count()).select_from(Chunk).where(Chunk.doc_id == doc.id)
+            )
+            old_chunk_count = chunk_result.scalar() or 0
+            if old_chunk_count > 0:
+                await db.execute(delete(Chunk).where(Chunk.doc_id == doc.id))
+                kb = await db.get(KnowledgeBase, kb_id)
+                if kb is not None:
+                    kb.chunk_count = max(0, kb.chunk_count - old_chunk_count)
+
+            # 清理旧向量（ChromaDB）
+            try:
+                collection = get_collection()
+                collection.delete(where={"doc_id": doc.id})
+            except Exception:
+                logger.warning("ChromaDB 清理 doc=%d 向量失败，跳过", doc.id)
+
+            # 重置文档状态
+            doc.status = DocumentStatus.UPLOADED
+            doc.error_msg = None
+            doc.chunk_count = 0
+            doc.current_stage = None
+            doc.last_success_batch = 0
+            await db.flush()
+            # doc_count 不递增（复用旧记录，PRD §5.4 约束）
+
+        elif not is_terminal(existing.status):
+            # 处理中（uploaded/parsing/chunking/embedding/vector_storing）
             if force:
                 raise ForceOverrideConflictException(
                     f"文档 '{filename}' 正在处理中（状态：{existing.status}），无法覆盖"
@@ -135,14 +169,21 @@ async def upload_document(
             await db.commit()  # 必须在 delay 前提交，否则 Worker 看不到 DELETING 状态
             _delete_doc_task.delay(existing.id)
 
-    # 创建文档记录
-    doc = Document(
-        kb_id=kb_id,
-        filename=filename,
-        file_type=ext,
-    )
-    db.add(doc)
-    await db.flush()
+    # 非复用场景：创建新文档记录
+    if doc is None:
+        doc = Document(
+            kb_id=kb_id,
+            filename=filename,
+            file_type=ext,
+        )
+        db.add(doc)
+        await db.flush()
+
+        # 递增 KB 文档计数
+        kb = await db.get(KnowledgeBase, kb_id)
+        if kb is not None:
+            kb.doc_count = KnowledgeBase.doc_count + 1
+
     await db.refresh(doc)
 
     # 保存文件
