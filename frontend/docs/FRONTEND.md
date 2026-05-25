@@ -370,7 +370,7 @@ GET /api/knowledge-bases/{id} → 显示 KB 信息 + 统计
 ## 5.7 公共知识库浏览页（PublicKnowledgeList — `/knowledge-bases/public`）
 
 > **权限**：所有登录用户。**Phase 2.5 新增页面**。
-> **对应后端**：`GET /api/knowledge-bases/public`（待实现）
+> **对应后端**：`GET /api/knowledge-bases/public`（已实现）
 
 ### 5.7.1 页面定位
 

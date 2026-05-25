@@ -355,7 +355,7 @@ body {
 }
 
 .ghost-btn:hover {
-    background: #DDD6FE;
+    background: var(--dm-primary-hover-light);
 }
 ```
 

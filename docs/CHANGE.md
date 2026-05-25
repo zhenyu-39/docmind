@@ -1,5 +1,16 @@
 # DocMind 变更日志
 
+## 2026-05-25 — 文档同步修复
+
+### 修改
+
+| 文件 | 变更 |
+|:---|:---|
+| `frontend/docs/UIDESIGN.md` | §4.1 幽灵按钮 hover 颜色 `#DDD6FE` → `var(--dm-primary-hover-light)` |
+| `frontend/docs/FRONTEND.md` | §5.7 `GET /api/knowledge-bases/public` 状态「待实现」→「已实现」 |
+| `docs/ARCHITECTURE.md` | 文件头开发进度更新至 Phase 2.5，版本 v0.13→v0.14 |
+| `backend/docs/API.md` | §4 POST documents/batch-upload 权限「仅创建者或 admin」→「仅 owner」，对齐 §9 权限表 |
+
 ## 2026-05-25 — 修复：上传文档后状态一直停在「解析中」
 
 ### 修复

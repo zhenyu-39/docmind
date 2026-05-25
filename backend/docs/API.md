@@ -433,7 +433,7 @@ def is_terminal(status: str) -> bool:
 
 ### POST `/api/knowledge-bases/{kb_id}/documents`
 
-**权限**：user（需登录，仅创建者或 admin）
+**权限**：user（需登录，仅 owner）
 
 上传文档（`multipart/form-data`），支持 `.pdf` `.docx` `.md` `.txt`。不支持 `.doc`（请先转换为 `.docx`）。
 
@@ -484,7 +484,7 @@ def is_terminal(status: str) -> bool:
 
 ### POST `/api/knowledge-bases/{kb_id}/documents/batch-upload`
 
-**权限**：user（需登录，仅创建者或 admin）
+**权限**：user（需登录，仅 owner）
 
 批量上传文档（`multipart/form-data`，多文件）。适合企业初始化知识库场景。
 
